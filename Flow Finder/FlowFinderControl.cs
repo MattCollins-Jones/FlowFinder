@@ -14,12 +14,17 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using XrmToolBox.Extensibility;
+using XrmToolBox.Extensibility.Interfaces;
 using System.Runtime.ExceptionServices;
 
 namespace Flow_Finder
 {
-    public partial class MyPluginControl : PluginControlBase
+    public partial class FlowFinderControl : PluginControlBase, IGitHubPlugin
     {
+        // Implement IGitHubPlugin so XrmToolBox will show the standard feedback -> New issue menu
+        public string RepositoryName => "FlowFinder";
+        public string UserName => "MattCollins-Jones";
+
         private Settings mySettings;
         private DataTable flowsTable;
         private List<FlowInfo> lastResults = new List<FlowInfo>();
@@ -42,7 +47,7 @@ namespace Flow_Finder
             public string OtherDataSources { get; set; }
         }
 
-        public MyPluginControl()
+        public FlowFinderControl()
         {
             AppDomain.CurrentDomain.FirstChanceException += CurrentDomain_FirstChanceException;
             InitializeComponent();
@@ -71,8 +76,7 @@ namespace Flow_Finder
             flowsTable.Columns.Add("Triggering Entity");
             flowsTable.Columns.Add("Other Data Sources");
 
-            dgvFlows.DataSource = flowsTable;
-            dgvFlows.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+            // Do not set DataSource or AutoSizeColumnsMode here — postpone to Load to avoid layout/resizing race conditions
         }
 
         private Guid GetGuidFromAttribute(Entity e, string attr)
@@ -191,6 +195,8 @@ namespace Flow_Finder
         {
             if (string.IsNullOrWhiteSpace(filterText) || filterText == "All solutions")
             {
+                // Clear any existing row filter so the DefaultView shows all rows again
+                try { if (flowsTable != null) flowsTable.DefaultView.RowFilter = string.Empty; } catch { }
                 dgvFlows.DataSource = flowsTable;
                 return;
             }
@@ -435,9 +441,10 @@ namespace Flow_Finder
                     AddRuntimeButtonIfMissing("tsbManageCoOwners", "Manage Co-Owners", tsbManageCoOwners_Click);
                     AddRuntimeButtonIfMissing("tsbManageSolutions", "Manage Solutions", tsbManageSolutions_Click);
                     AddRuntimeButtonIfMissing("tsbSettingsRuntime", "Settings", tsbSettings_Click);
-                }
-            }
-            catch { }
+                    // Feedback is provided via the host Feedback menu (IGitHubPlugin). Do not add a runtime toolbar button here.
+                 }
+             }
+             catch { }
 
             // Ensure filter shows immediately
             try
@@ -448,6 +455,24 @@ namespace Flow_Finder
                     cmbSolutions.ComboBox.Items.Add("All solutions");
                     cmbSolutions.SelectedIndex = 0;
                 }
+            }
+            catch { }
+
+            // Assign DataSource and column sizing after control is created to avoid DataGridView auto-fill resize errors
+            try
+            {
+                this.BeginInvoke((Action)(() =>
+                {
+                    try
+                    {
+                        if (dgvFlows != null)
+                        {
+                            dgvFlows.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+                            if (flowsTable != null) dgvFlows.DataSource = flowsTable;
+                        }
+                    }
+                    catch { }
+                }));
             }
             catch { }
         }
@@ -535,6 +560,34 @@ namespace Flow_Finder
                 btnOk.Click += (s, e) => { if (rbNone.Checked) PluginSettings.RefreshAfterDialogMode = Flow_Finder.RefreshMode.None; else if (rbRefreshFlow.Checked) PluginSettings.RefreshAfterDialogMode = Flow_Finder.RefreshMode.RefreshFlow; else PluginSettings.RefreshAfterDialogMode = Flow_Finder.RefreshMode.RefreshAll; this.DialogResult = DialogResult.OK; this.Close(); };
                 this.Controls.Add(btnOk);
                 btnCancel = new System.Windows.Forms.Button() { Left = 310, Top = 100, Width = 80, Text = "Cancel" }; btnCancel.Click += (s, e) => { this.DialogResult = DialogResult.Cancel; this.Close(); }; this.Controls.Add(btnCancel);
+
+                // Add a feedback button so users see feedback option in settings
+                var btnFeedback = new System.Windows.Forms.Button() { Left = 10, Top = 100, Width = 200, Text = "Report feedback (GitHub)" };
+                btnFeedback.Click += (s, e) => {
+                    try
+                    {
+                        var asm = System.Reflection.Assembly.GetExecutingAssembly();
+                        var ver = asm.GetName().Version?.ToString() ?? "unknown";
+                        var title = System.Uri.EscapeDataString($"Issue: Flow Finder v{ver}");
+                        var bodyBuilder = new System.Text.StringBuilder();
+                        bodyBuilder.AppendLine("Please describe the issue you encountered and steps to reproduce:");
+                        bodyBuilder.AppendLine();
+                        bodyBuilder.AppendLine("---");
+                        bodyBuilder.AppendLine($"Plugin version: {ver}");
+                        bodyBuilder.AppendLine($"Assembly: {asm.GetName().Name}");
+                        bodyBuilder.AppendLine($"OS: {Environment.OSVersion}");
+                        bodyBuilder.AppendLine($"CLR: {Environment.Version}");
+                        var body = System.Uri.EscapeDataString(bodyBuilder.ToString());
+                        var url = $"https://github.com/{"MattCollins-Jones"}/{"FlowFinder"}/issues/new?title={title}&body={body}";
+                        var psi = new System.Diagnostics.ProcessStartInfo { FileName = url, UseShellExecute = true };
+                        System.Diagnostics.Process.Start(psi);
+                    }
+                    catch (Exception ex)
+                    {
+                        try { MessageBox.Show("Failed to open the GitHub issues page: " + ex.Message); } catch { }
+                    }
+                };
+                this.Controls.Add(btnFeedback);
             }
         }
 
@@ -880,6 +933,11 @@ namespace Flow_Finder
             }
             catch { }
             return false;
+        }
+
+        private void toolStripMenu_ItemClicked(object sender, ToolStripItemClickedEventArgs e)
+        {
+
         }
     }
 }

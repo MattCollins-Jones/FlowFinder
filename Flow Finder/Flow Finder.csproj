@@ -239,12 +239,12 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="MyPlugin.cs" />
-    <Compile Include="MyPluginControl.cs">
+    <Compile Include="FlowFinder.cs" />
+    <Compile Include="FlowFinderControl.cs">
       <SubType>UserControl</SubType>
     </Compile>
-    <Compile Include="MyPluginControl.designer.cs">
-      <DependentUpon>MyPluginControl.cs</DependentUpon>
+    <Compile Include="FlowFinderControl.designer.cs">
+      <DependentUpon>FlowFinderControl.cs</DependentUpon>
     </Compile>
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Properties\Resources.Designer.cs">
@@ -259,8 +259,8 @@
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
-    <EmbeddedResource Include="MyPluginControl.resx">
-      <DependentUpon>MyPluginControl.cs</DependentUpon>
+    <EmbeddedResource Include="FlowFinderControl.resx">
+      <DependentUpon>FlowFinderControl.cs</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="Properties\Resources.resx">
       <Generator>ResXFileCodeGenerator</Generator>
