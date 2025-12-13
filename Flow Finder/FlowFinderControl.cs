@@ -113,6 +113,35 @@ namespace Flow_Finder
             return val == null ? null : val.ToString();
         }
 
+        // Names to exclude from disabled checks (case-insensitive)
+        private static readonly HashSet<string> DisabledUserExceptions = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "System" };
+
+        private bool IsUserDisabled(Guid userId, out string fullName)
+        {
+            fullName = null;
+            if (userId == Guid.Empty) return false;
+            try
+            {
+                var u = Service.Retrieve("systemuser", userId, new ColumnSet("systemuserid", "fullname", "isdisabled"));
+                if (u == null) return false;
+                fullName = GetStringSafe(u, "fullname");
+                // exclude known system/test accounts by name (trim whitespace)
+                if (!string.IsNullOrEmpty(fullName) && DisabledUserExceptions.Contains(fullName.Trim())) return false;
+                try { if (u.Contains("isdisabled") && u.GetAttributeValue<bool>("isdisabled")) return true; } catch { }
+            }
+            catch { }
+            return false;
+        }
+
+        private string RemoveDisabledMarker(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return s;
+            const string marker = "(disabled)";
+            var idx = s.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (idx >= 0) s = s.Remove(idx, marker.Length);
+            return s.Trim();
+        }
+
         private void ParseClientData(string clientJson, FlowInfo fi)
         {
             if (string.IsNullOrWhiteSpace(clientJson) || fi == null) return;
@@ -270,7 +299,7 @@ namespace Flow_Finder
                         var sols = Service.RetrieveMultiple(solFetch);
                         foreach (var s in sols.Entities)
                         {
-                            var friendly = GetStringSafe(s, "friendlyname") ?? GetStringSafe(s, "uniquename");
+                            var friendly = GetStringSafe(s, "friendlyname") ?? GetStringSafe(s, "uniquenessOwnerFinder_plugin");
                             var uniq = GetStringSafe(s, "uniquename") ?? string.Empty;
                             if (!string.IsNullOrEmpty(uniq) && uniq.Equals("default", StringComparison.OrdinalIgnoreCase)) continue;
                             if (!string.IsNullOrEmpty(friendly) && (friendly.IndexOf("default solution", StringComparison.OrdinalIgnoreCase) >= 0 || friendly.IndexOf("active solution", StringComparison.OrdinalIgnoreCase) >= 0)) continue;
@@ -292,6 +321,7 @@ namespace Flow_Finder
 
                     var results = new List<FlowInfo>();
                     var principalIds = new HashSet<Guid>();
+                    var ownerIds = new HashSet<Guid>();
 
                     foreach (var f in flows.Entities)
                     {
@@ -329,17 +359,33 @@ namespace Flow_Finder
                         }
                         catch { }
 
+                        // track owner ids for later disabled check
+                        if (fi.OwnerId != Guid.Empty) ownerIds.Add(fi.OwnerId);
+
                         results.Add(fi);
                     }
 
                     var principalNames = new Dictionary<Guid, string>();
-                    if (principalIds.Any())
+                    var principalDisabled = new HashSet<Guid>();
+                    // include owner ids alongside shared principals so we can detect disabled primary owners too
+                    var userIdsToCheck = new HashSet<Guid>(principalIds);
+                    foreach (var oid in ownerIds) userIdsToCheck.Add(oid);
+                    if (userIdsToCheck.Any())
                     {
-                        var idsArray = principalIds.ToArray();
-                        var userQ = new QueryExpression("systemuser") { ColumnSet = new ColumnSet("systemuserid", "fullname") };
+                        var idsArray = userIdsToCheck.ToArray();
+                        var userQ = new QueryExpression("systemuser") { ColumnSet = new ColumnSet("systemuserid", "fullname", "isdisabled") };
                         userQ.Criteria.AddCondition("systemuserid", ConditionOperator.In, idsArray.Cast<object>().ToArray());
                         var users = Service.RetrieveMultiple(userQ);
-                        foreach (var u in users.Entities) principalNames[u.Id] = GetStringSafe(u, "fullname");
+                        foreach (var u in users.Entities)
+                        {
+                            var fullname = GetStringSafe(u, "fullname");
+                            principalNames[u.Id] = fullname;
+                            bool isDisabled = false;
+                            try { if (u.Contains("isdisabled")) isDisabled = u.GetAttributeValue<bool>("isdisabled"); } catch { }
+                            // Do not treat listed exception names as disabled (trim whitespace)
+                            try { if (!string.IsNullOrEmpty(fullname) && DisabledUserExceptions.Contains(fullname.Trim())) isDisabled = false; } catch { }
+                            if (isDisabled) principalDisabled.Add(u.Id);
+                        }
 
                         var teamQ = new QueryExpression("team") { ColumnSet = new ColumnSet("teamid", "name") };
                         teamQ.Criteria.AddCondition("teamid", ConditionOperator.In, idsArray.Cast<object>().ToArray());
@@ -347,15 +393,60 @@ namespace Flow_Finder
                         foreach (var t in teams.Entities) principalNames[t.Id] = GetStringSafe(t, "name");
                     }
 
+                    // As a fallback, ensure primary owners are resolved even if not returned above
+                    try
+                    {
+                        foreach (var fi in results)
+                        {
+                            if (fi.OwnerId != Guid.Empty && !principalNames.ContainsKey(fi.OwnerId))
+                            {
+                                try
+                                {
+                                    var ownerEnt = Service.Retrieve("systemuser", fi.OwnerId, new ColumnSet("systemuserid", "fullname", "isdisabled"));
+                                    if (ownerEnt != null && ownerEnt.Id != Guid.Empty)
+                                    {
+                                        var ownerFull = GetStringSafe(ownerEnt, "fullname");
+                                        principalNames[ownerEnt.Id] = ownerFull;
+                                        try
+                                        {
+                                            bool ownerIsDisabled = false;
+                                            try { ownerIsDisabled = ownerEnt.Contains("isdisabled") && ownerEnt.GetAttributeValue<bool>("isdisabled"); } catch { }
+                                            // Do not treat listed exception names as disabled
+                                            if (!string.IsNullOrEmpty(ownerFull) && DisabledUserExceptions.Contains(ownerFull.Trim())) ownerIsDisabled = false;
+                                            if (ownerIsDisabled) principalDisabled.Add(ownerEnt.Id);
+                                        }
+                                        catch { }
+                                    }
+                                }
+                                catch { }
+                            }
+                        }
+                    }
+                    catch { }
+
                     foreach (var fi in results)
                     {
                         if (fi.PrincipalIds != null && fi.PrincipalIds.Any())
                         {
                             var coIds = fi.PrincipalIds.Where(id => id != fi.OwnerId).Distinct().ToList();
-                            var coNames = coIds.Select(id => principalNames.ContainsKey(id) ? principalNames[id] : id.ToString()).ToList();
-                            fi.CoOwners = coNames.Any() ? string.Join(", ", coNames) : null;
+                            var coNames = new List<string>();
+                            foreach (var id in coIds)
+                            {
+                                var name = principalNames.ContainsKey(id) ? principalNames[id] : id.ToString();
+                                if (principalDisabled.Contains(id)) name += " (disabled)";
+                                coNames.Add(name);
+                            }
+                             fi.CoOwners = coNames.Any() ? string.Join(", ", coNames) : null;
                         }
                         else fi.CoOwners = null;
+
+                        // prefer resolved name for primary owner and annotate if disabled
+                        try
+                        {
+                            if (fi.OwnerId != Guid.Empty && principalNames.ContainsKey(fi.OwnerId)) fi.Owner = principalNames[fi.OwnerId];
+                            if (fi.OwnerId != Guid.Empty && principalDisabled.Contains(fi.OwnerId)) fi.Owner = (fi.Owner ?? string.Empty) + " (disabled)";
+                        }
+                        catch { }
                     }
 
                     foreach (var fi in results)
@@ -372,7 +463,7 @@ namespace Flow_Finder
                         catch { }
                     }
 
-                    args.Result = new { Results = results, Solutions = allSolutionNames };
+                    args.Result = new { Results = results, Solutions = allSolutionNames, DisabledPrincipalIds = principalDisabled.ToArray() };
                 },
                 PostWorkCallBack = (args) =>
                 {
@@ -385,6 +476,7 @@ namespace Flow_Finder
                     dynamic r = args.Result;
                     lastResults = ((List<FlowInfo>)r.Results).OrderBy(f => f.Name).ToList();
                     var solutionNames = (List<string>)r.Solutions;
+                    var disabledIds = (Guid[])r.DisabledPrincipalIds;
 
                     try { dgvFlows.DataSource = null; } catch { }
                     flowsTable.Clear();
@@ -406,6 +498,74 @@ namespace Flow_Finder
                     for (int i = 0; i < dgvFlows.Rows.Count && i < lastResults.Count; i++)
                     {
                         try { dgvFlows.Rows[i].Tag = lastResults[i].Id; } catch { }
+                        try
+                        {
+                            var fi = lastResults[i];
+                            // ensure primary owner disabled state is detected even if earlier lookup missed it
+                            try
+                            {
+                                if (fi.OwnerId != Guid.Empty)
+                                {
+                                    try
+                                    {
+                                        if (IsUserDisabled(fi.OwnerId, out var resolvedName))
+                                        {
+                                            if (!string.IsNullOrEmpty(resolvedName)) fi.Owner = resolvedName + " (disabled)";
+                                            else fi.Owner = (fi.Owner ?? string.Empty) + " (disabled)";
+                                            // update the cell immediately so display shows disabled marker
+                                            try { dgvFlows.Rows[i].Cells[3].Value = fi.Owner; } catch { }
+                                        }
+                                    }
+                                    catch { }
+                                }
+                            }
+                            catch { }
+                            
+                             // fallback: detect disabled users by checking the display strings we annotated earlier
+                             bool hasDisabled = false;
+                             try
+                             {
+                                 // detect disabled markers in display strings but ignore any entries that are in the exception list
+                                 if (!string.IsNullOrEmpty(fi.Owner) && fi.Owner.IndexOf("(disabled)", StringComparison.OrdinalIgnoreCase) >= 0)
+                                 {
+                                     var ownerBase = RemoveDisabledMarker(fi.Owner);
+                                     if (!DisabledUserExceptions.Contains(ownerBase)) hasDisabled = true;
+                                 }
+                                 if (!hasDisabled && !string.IsNullOrEmpty(fi.CoOwners) && fi.CoOwners.IndexOf("(disabled)", StringComparison.OrdinalIgnoreCase) >= 0)
+                                 {
+                                     try
+                                     {
+                                         var parts = fi.CoOwners.Split(',');
+                                         foreach (var p in parts)
+                                         {
+                                             if (p.IndexOf("(disabled)", StringComparison.OrdinalIgnoreCase) >= 0)
+                                             {
+                                                 var baseName = RemoveDisabledMarker(p);
+                                                 if (!DisabledUserExceptions.Contains(baseName)) { hasDisabled = true; break; }
+                                             }
+                                         }
+                                     }
+                                     catch { }
+                                 }
+                            }
+                            catch { }
+                            if (hasDisabled)
+                            {
+                                dgvFlows.Rows[i].DefaultCellStyle.BackColor = Color.LightYellow;
+                                dgvFlows.Rows[i].DefaultCellStyle.SelectionBackColor = Color.Gold;
+                                dgvFlows.Rows[i].DefaultCellStyle.ForeColor = Color.DarkRed;
+                                try { dgvFlows.Rows[i].DefaultCellStyle.Font = new Font(dgvFlows.Font, FontStyle.Bold); } catch { }
+                            }
+                            else
+                            {
+                                // explicitly clear any prior custom styling
+                                dgvFlows.Rows[i].DefaultCellStyle.BackColor = Color.Empty;
+                                dgvFlows.Rows[i].DefaultCellStyle.SelectionBackColor = Color.Empty;
+                                dgvFlows.Rows[i].DefaultCellStyle.ForeColor = Color.Empty;
+                                try { dgvFlows.Rows[i].DefaultCellStyle.Font = dgvFlows.Font; } catch { }
+                            }
+                        }
+                        catch { }
                     }
 
                     cmbSolutions.SelectedIndexChanged -= cmbSolutions_SelectedIndexChanged;
@@ -567,7 +727,7 @@ namespace Flow_Finder
                     try
                     {
                         var asm = System.Reflection.Assembly.GetExecutingAssembly();
-                        var ver = asm.GetName().Version?.ToString() ?? "unknown";
+                        var ver = asm.GetName(). Version?.ToString() ?? "unknown";
                         var title = System.Uri.EscapeDataString($"Issue: Flow Finder v{ver}");
                         var bodyBuilder = new System.Text.StringBuilder();
                         bodyBuilder.AppendLine("Please describe the issue you encountered and steps to reproduce:");
@@ -630,6 +790,7 @@ namespace Flow_Finder
                 Work = (w, a) =>
                 {
                     var fi = new FlowInfo();
+                    var disabledSet = new HashSet<Guid>();
                     try
                     {
                         var wf = Service.Retrieve("workflow", flowId, new ColumnSet("workflowid", "name", "ownerid", "description", "createdby", "clientdata"));
@@ -641,16 +802,31 @@ namespace Flow_Finder
                             var resp = (RetrieveSharedPrincipalsAndAccessResponse)Service.Execute(req);
                             var principalIds = new List<Guid>();
                             if (resp?.PrincipalAccesses != null) foreach (var pa in resp.PrincipalAccesses) if (pa.Principal is EntityReference er) principalIds.Add(er.Id);
-                            if (principalIds.Any())
+                            if (principalIds.Any() || fi.OwnerId != Guid.Empty)
                             {
-                                var userQ = new QueryExpression("systemuser") { ColumnSet = new ColumnSet("systemuserid", "fullname") };
-                                userQ.Criteria.AddCondition("systemuserid", ConditionOperator.In, principalIds.Cast<object>().ToArray());
+                                // include owner id so we can detect primary owner disabled state as well
+                                var idsToQuery = new HashSet<Guid>(principalIds);
+                                if (fi.OwnerId != Guid.Empty) idsToQuery.Add(fi.OwnerId);
+                                var userQ = new QueryExpression("systemuser") { ColumnSet = new ColumnSet("systemuserid", "fullname", "isdisabled") };
+                                userQ.Criteria.AddCondition("systemuserid", ConditionOperator.In, idsToQuery.Cast<object>().ToArray());
                                 var users = Service.RetrieveMultiple(userQ);
                                 var names = new Dictionary<Guid, string>();
-                                foreach (var u in users.Entities) names[u.Id] = u.GetAttributeValue<string>("fullname");
-                                var coIds = principalIds.Where(id => id != fi.OwnerId).Distinct().ToList();
-                                var coNames = coIds.Select(id => names.ContainsKey(id) ? names[id] : id.ToString()).ToList();
-                                fi.CoOwners = coNames.Any() ? string.Join(", ", coNames) : null;
+                                foreach (var u in users.Entities)
+                                {
+                                    var fullname = u.GetAttributeValue<string>("fullname");
+                                    // Append disabled marker only if not in exception list
+                                    try
+                                    {
+                                        var isDisabled = u.Contains("isdisabled") && u.GetAttributeValue<bool>("isdisabled");
+                                        if (!string.IsNullOrEmpty(fullname) && DisabledUserExceptions.Contains(fullname.Trim())) isDisabled = false;
+                                        names[u.Id] = fullname ?? u.Id.ToString();
+                                        if (isDisabled) names[u.Id] += " (disabled)";
+                                    }
+                                    catch
+                                    {
+                                        names[u.Id] = fullname ?? u.Id.ToString();
+                                    }
+                                }
                             }
                         }
                         catch { }
@@ -680,13 +856,65 @@ namespace Flow_Finder
                         catch { }
                     }
                     catch (Exception ex) { a.Result = ex; return; }
-                    a.Result = fi;
+                    a.Result = new { Flow = fi, DisabledPrincipalIds = disabledSet.ToArray() };
                 },
                 PostWorkCallBack = (a) =>
                 {
                     if (a.Error != null) { MessageBox.Show(a.Error.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
                     if (a.Result is Exception ex) { MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
-                    var fi = (FlowInfo)a.Result; var idx = lastResults.FindIndex(x => x.Id == fi.Id); if (idx >= 0) lastResults[idx] = fi; foreach (DataGridViewRow row in dgvFlows.Rows) { if (row.Tag is Guid id && id == fi.Id) { row.Cells[0].Value = fi.Name; row.Cells[1].Value = fi.Description ?? ""; row.Cells[2].Value = fi.Solutions ?? ""; row.Cells[3].Value = fi.Owner ?? ""; row.Cells[4].Value = fi.CoOwners ?? ""; try { row.Cells[4].ToolTipText = fi.CoOwners ?? string.Empty; } catch { } break; } }
+                    dynamic res = a.Result; var fi = (FlowInfo)res.Flow; var disabled = (Guid[])res.DisabledPrincipalIds;
+                    var idx = lastResults.FindIndex(x => x.Id == fi.Id); if (idx >= 0) lastResults[idx] = fi;
+                    foreach (DataGridViewRow row in dgvFlows.Rows)
+                    {
+                        if (row.Tag is Guid id && id == fi.Id)
+                        {
+                            row.Cells[0].Value = fi.Name; row.Cells[1].Value = fi.Description ?? ""; row.Cells[2].Value = fi.Solutions ?? ""; row.Cells[3].Value = fi.Owner ?? ""; row.Cells[4].Value = fi.CoOwners ?? "";
+                            try { row.Cells[4].ToolTipText = fi.CoOwners ?? string.Empty; } catch { }
+                            try
+                            {
+                                bool hasDisabled = false;
+                                // detect disabled markers in display strings but ignore any entries that are in the exception list
+                                if (!string.IsNullOrEmpty(fi.Owner) && fi.Owner.IndexOf("(disabled)", StringComparison.OrdinalIgnoreCase) >= 0)
+                                {
+                                    var ownerBase = RemoveDisabledMarker(fi.Owner);
+                                    if (!DisabledUserExceptions.Contains(ownerBase)) hasDisabled = true;
+                                }
+                                if (!hasDisabled && !string.IsNullOrEmpty(fi.CoOwners) && fi.CoOwners.IndexOf("(disabled)", StringComparison.OrdinalIgnoreCase) >= 0)
+                                {
+                                    try
+                                    {
+                                        var parts = fi.CoOwners.Split(',');
+                                        foreach (var p in parts)
+                                        {
+                                            if (p.IndexOf("(disabled)", StringComparison.OrdinalIgnoreCase) >= 0)
+                                            {
+                                                var baseName = RemoveDisabledMarker(p);
+                                                if (!DisabledUserExceptions.Contains(baseName)) { hasDisabled = true; break; }
+                                            }
+                                        }
+                                    }
+                                    catch { }
+                                }
+
+                                if (hasDisabled)
+                                {
+                                    row.DefaultCellStyle.BackColor = Color.LightYellow;
+                                    row.DefaultCellStyle.SelectionBackColor = Color.Gold;
+                                    row.DefaultCellStyle.ForeColor = Color.DarkRed;
+                                    try { row.DefaultCellStyle.Font = new Font(dgvFlows.Font, FontStyle.Bold); } catch { }
+                                }
+                                else
+                                {
+                                    row.DefaultCellStyle.BackColor = Color.Empty;
+                                    row.DefaultCellStyle.SelectionBackColor = Color.Empty;
+                                    row.DefaultCellStyle.ForeColor = Color.Empty;
+                                    try { row.DefaultCellStyle.Font = dgvFlows.Font; } catch { }
+                                }
+                            }
+                            catch { }
+                            break;
+                        }
+                    }
                 }
             });
         }
@@ -727,53 +955,35 @@ namespace Flow_Finder
                 catch (Exception ex) { _logWarn("Failed to load co-owners: " + ex.Message); MessageBox.Show("Failed to load co-owners: " + ex.Message); }
 
                 var names = new Dictionary<Guid, string>();
+                var disabledSetLocal = new HashSet<Guid>();
                 if (principalIds.Any())
                 {
-                    try { var userQ = new QueryExpression("systemuser") { ColumnSet = new ColumnSet("systemuserid", "fullname") }; userQ.Criteria.AddCondition("systemuserid", ConditionOperator.In, principalIds.Cast<object>().ToArray()); var users = _service.RetrieveMultiple(userQ); foreach (var u in users.Entities) names[u.Id] = u.GetAttributeValue<string>("fullname"); }
+                    try
+                    {
+                        var userQ = new QueryExpression("systemuser") { ColumnSet = new ColumnSet("systemuserid", "fullname", "isdisabled") };
+                        userQ.Criteria.AddCondition("systemuserid", ConditionOperator.In, principalIds.Cast<object>().ToArray());
+                        var users = _service.RetrieveMultiple(userQ);
+                        foreach (var u in users.Entities)
+                        {
+                            var fullname = u.GetAttributeValue<string>("fullname");
+                            names[u.Id] = fullname ?? u.Id.ToString();
+                            bool isDisabled = false;
+                            try { if (u.Contains("isdisabled")) isDisabled = u.GetAttributeValue<bool>("isdisabled"); } catch { }
+                            // Do not treat listed exception names as disabled (trim whitespace)
+                            try { if (!string.IsNullOrEmpty(fullname) && DisabledUserExceptions.Contains(fullname.Trim())) isDisabled = false; } catch { }
+                            if (isDisabled) disabledSetLocal.Add(u.Id);
+                        }
+                    }
                     catch (Exception ex) { _logWarn("Failed to resolve co-owner user names: " + ex.Message); }
                     try { var teamQ = new QueryExpression("team") { ColumnSet = new ColumnSet("teamid", "name") }; teamQ.Criteria.AddCondition("teamid", ConditionOperator.In, principalIds.Cast<object>().ToArray()); var teams = _service.RetrieveMultiple(teamQ); foreach (var t in teams.Entities) names[t.Id] = t.GetAttributeValue<string>("name"); }
                     catch (Exception ex) { _logWarn("Failed to resolve team names: " + ex.Message); }
                 }
 
-                foreach (var id in principalIds) lbCoOwners.Items.Add(new ListItem { Id = id, Name = names.ContainsKey(id) ? names[id] : id.ToString() });
-
-                // load users for candidates
-                try
+                foreach (var id in principalIds)
                 {
-                    Guid ownerId = Guid.Empty;
-                    try
-                    {
-                        var wf = _service.Retrieve("workflow", _flowId, new ColumnSet("ownerid"));
-                        if (wf != null && wf.Contains("ownerid"))
-                        {
-                            var or = wf.GetAttributeValue<EntityReference>("ownerid");
-                            if (or != null) ownerId = or.Id;
-                        }
-                    }
-                    catch { }
-
-                    var exclude = new HashSet<Guid>(principalIds);
-                    if (ownerId != Guid.Empty) exclude.Add(ownerId);
-
-                    var userList = new List<ListItem>();
-                    var q = new QueryExpression("systemuser") { ColumnSet = new ColumnSet("systemuserid", "fullname") };
-                    var res = _service.RetrieveMultiple(q);
-                    foreach (var u in res.Entities)
-                    {
-                        var id = u.Id;
-                        if (exclude.Contains(id)) continue;
-                        userList.Add(new ListItem { Id = id, Name = u.GetAttributeValue<string>("fullname") });
-                    }
-
-                    userList = userList.OrderBy(x => x.Name).ToList();
-                    cbUsers.DisplayMember = "Name"; cbUsers.ValueMember = "Id";
-                    cbUsers.DataSource = userList;
-                    _logInfo($"Loaded {userList.Count} candidate users for adding as co-owner");
-                }
-                catch (Exception ex)
-                {
-                    _logWarn("Failed to load users: " + ex.Message);
-                    MessageBox.Show("Failed to load users: " + ex.Message);
+                    var display = names.ContainsKey(id) ? names[id] : id.ToString();
+                    if (disabledSetLocal.Contains(id)) display += " (disabled)";
+                    lbCoOwners.Items.Add(new ListItem { Id = id, Name = display });
                 }
             }
 
@@ -936,6 +1146,11 @@ namespace Flow_Finder
         }
 
         private void toolStripMenu_ItemClicked(object sender, ToolStripItemClickedEventArgs e)
+        {
+
+        }
+
+        private void dgvFlows_CellContentClick(object sender, DataGridViewCellEventArgs e)
         {
 
         }

@@ -112,15 +112,16 @@
             this.dgvFlows.SelectionMode = System.Windows.Forms.DataGridViewSelectionMode.FullRowSelect;
             this.dgvFlows.Size = new System.Drawing.Size(1071, 406);
             this.dgvFlows.TabIndex = 5;
+            this.dgvFlows.CellContentClick += new System.Windows.Forms.DataGridViewCellEventHandler(this.dgvFlows_CellContentClick);
             // 
-            // MyPluginControl
+            // FlowFinderControl
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(9F, 20F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.Controls.Add(this.dgvFlows);
             this.Controls.Add(this.toolStripMenu);
             this.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
-            this.Name = "MyPluginControl";
+            this.Name = "FlowFinderControl";
             this.PluginIcon = ((System.Drawing.Icon)(resources.GetObject("$this.PluginIcon")));
             this.Size = new System.Drawing.Size(1095, 462);
             this.TabIcon = ((System.Drawing.Image)(resources.GetObject("$this.TabIcon")));
