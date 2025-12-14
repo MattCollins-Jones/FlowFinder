@@ -34,6 +34,7 @@
             this.tssSeparator1 = new System.Windows.Forms.ToolStripSeparator();
             this.tsbListCloudFlows = new System.Windows.Forms.ToolStripButton();
             this.tsbExport = new System.Windows.Forms.ToolStripButton();
+            this.chkHideManaged = new System.Windows.Forms.ToolStripButton();
             this.cmbSolutions = new System.Windows.Forms.ToolStripComboBox();
             this.dgvFlows = new System.Windows.Forms.DataGridView();
             this.toolStripMenu.SuspendLayout();
@@ -48,6 +49,7 @@
             this.tssSeparator1,
             this.tsbListCloudFlows,
             this.tsbExport,
+            this.chkHideManaged,
             this.cmbSolutions});
             this.toolStripMenu.Location = new System.Drawing.Point(0, 0);
             this.toolStripMenu.Name = "toolStripMenu";
@@ -83,9 +85,20 @@
             this.tsbExport.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
             this.tsbExport.Margin = new System.Windows.Forms.Padding(10, 1, 10, 1);
             this.tsbExport.Name = "tsbExport";
-            this.tsbExport.Size = new System.Drawing.Size(67, 36);
-            this.tsbExport.Text = "Export";
+            this.tsbExport.Size = new System.Drawing.Size(117, 36);
+            this.tsbExport.Text = "Export Flows";
             this.tsbExport.Click += new System.EventHandler(this.tsbExport_Click);
+            // 
+            // chkHideManaged
+            // 
+            this.chkHideManaged.Alignment = System.Windows.Forms.ToolStripItemAlignment.Right;
+            this.chkHideManaged.CheckOnClick = true;
+            this.chkHideManaged.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
+            this.chkHideManaged.Margin = new System.Windows.Forms.Padding(0, 1, 6, 1);
+            this.chkHideManaged.Name = "chkHideManaged";
+            this.chkHideManaged.Size = new System.Drawing.Size(133, 36);
+            this.chkHideManaged.Text = "Hide managed";
+            this.chkHideManaged.Click += new System.EventHandler(this.chkHideManaged_Click);
             // 
             // cmbSolutions
             // 
@@ -94,7 +107,6 @@
             this.cmbSolutions.Margin = new System.Windows.Forms.Padding(0, 1, 10, 1);
             this.cmbSolutions.Name = "cmbSolutions";
             this.cmbSolutions.Size = new System.Drawing.Size(310, 36);
-            this.cmbSolutions.SelectedIndexChanged += new System.EventHandler(this.cmbSolutions_SelectedIndexChanged);
             // 
             // dgvFlows
             // 
@@ -141,6 +153,7 @@
         private System.Windows.Forms.ToolStripSeparator tssSeparator1;
         private System.Windows.Forms.ToolStripButton tsbListCloudFlows;
         private System.Windows.Forms.ToolStripButton tsbExport;
+        private System.Windows.Forms.ToolStripButton chkHideManaged;
         private System.Windows.Forms.ToolStripComboBox cmbSolutions;
         private System.Windows.Forms.DataGridView dgvFlows;
     }

@@ -34,6 +34,7 @@ namespace Flow_Finder
             public Guid Id { get; set; }
             public string Name { get; set; }
             public bool InSolution { get; set; }
+            public bool IsInManagedSolution { get; set; }
             public string Solutions { get; set; }
             public string Owner { get; set; }
             public Guid OwnerId { get; set; }
@@ -75,6 +76,8 @@ namespace Flow_Finder
             flowsTable.Columns.Add("Triggering Source");
             flowsTable.Columns.Add("Triggering Entity");
             flowsTable.Columns.Add("Other Data Sources");
+            // hidden flag column used for filtering (added at end so existing column indexes remain stable)
+            flowsTable.Columns.Add("IsInManagedSolution", typeof(bool));
 
             // Do not set DataSource or AutoSizeColumnsMode here — postpone to Load to avoid layout/resizing race conditions
         }
@@ -230,17 +233,52 @@ namespace Flow_Finder
                 return;
             }
 
-            var dv = flowsTable.DefaultView;
-            dv.RowFilter = $"Solutions LIKE '%{filterText.Replace("'","''")}%'";
+            // legacy single-purpose filter preserved but redirect to ApplyFilters
+            ApplyFilters();
         }
 
-        private void cmbSolutions_SelectedIndexChanged(object sender, EventArgs e)
+        private void ApplyFilters()
         {
-            if (cmbSolutions.SelectedIndex < 0) return;
-            var sel = cmbSolutions.ComboBox.Items[cmbSolutions.SelectedIndex];
-            if (sel == null) return;
-            var solutionName = sel.ToString();
-            ApplySolutionFilter(solutionName);
+            if (flowsTable == null) return;
+            var filters = new List<string>();
+            // solution dropdown
+            try
+            {
+                if (cmbSolutions != null && cmbSolutions.SelectedIndex > 0)
+                {
+                    var sel = cmbSolutions.ComboBox.Items[cmbSolutions.SelectedIndex];
+                    if (sel != null)
+                    {
+                        var solutionName = sel.ToString().Replace("'", "''");
+                        filters.Add($"Solutions LIKE '%{solutionName}%'");
+                    }
+                }
+            }
+            catch { }
+
+            // hide managed toggle
+            try
+            {
+                if (chkHideManaged != null && chkHideManaged.Checked)
+                {
+                    filters.Add("IsInManagedSolution = false");
+                }
+            }
+            catch { }
+
+            var dv = flowsTable.DefaultView;
+            dv.RowFilter = filters.Any() ? string.Join(" AND ", filters) : string.Empty;
+        }
+
+        private void chkHideManaged_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                // Update label to indicate the action that pressing the button will perform
+                try { if (chkHideManaged != null) chkHideManaged.Text = chkHideManaged.Checked ? "Show managed" : "Hide managed"; } catch { }
+                ApplyFilters();
+            }
+            catch { }
         }
 
         private void btnRefresh_Click(object sender, EventArgs e)
@@ -292,32 +330,37 @@ namespace Flow_Finder
 
                     var solutionIds = solutionComponents.Entities.Select(sc => GetGuidFromAttribute(sc, "solutionid")).Where(g => g != Guid.Empty).Distinct().ToList();
                     var solutionNames = new Dictionary<Guid, string>();
+                    var solutionIsManaged = new Dictionary<Guid, bool>();
                     if (solutionIds.Any())
                     {
-                        var solFetch = new QueryExpression("solution") { ColumnSet = new ColumnSet("solutionid", "friendlyname", "uniquename") };
+                        var solFetch = new QueryExpression("solution") { ColumnSet = new ColumnSet("solutionid", "friendlyname", "uniquename", "ismanaged") };
                         solFetch.Criteria.AddCondition("solutionid", ConditionOperator.In, solutionIds.Select(g => (object)g).ToArray());
                         var sols = Service.RetrieveMultiple(solFetch);
                         foreach (var s in sols.Entities)
                         {
-                            var friendly = GetStringSafe(s, "friendlyname") ?? GetStringSafe(s, "uniquenessOwnerFinder_plugin");
+                            var friendly = GetStringSafe(s, "friendlyname") ?? GetStringSafe(s, "uniquename");
                             var uniq = GetStringSafe(s, "uniquename") ?? string.Empty;
                             if (!string.IsNullOrEmpty(uniq) && uniq.Equals("default", StringComparison.OrdinalIgnoreCase)) continue;
                             if (!string.IsNullOrEmpty(friendly) && (friendly.IndexOf("default solution", StringComparison.OrdinalIgnoreCase) >= 0 || friendly.IndexOf("active solution", StringComparison.OrdinalIgnoreCase) >= 0)) continue;
                             solutionNames[s.Id] = friendly;
+                            try { solutionIsManaged[s.Id] = s.GetAttributeValue<bool?>("ismanaged") ?? false; } catch { solutionIsManaged[s.Id] = false; }
                         }
                     }
 
-                    var flowSolutions = new Dictionary<Guid, List<string>>();
+                    var flowSolutionNames = new Dictionary<Guid, List<string>>();
+                    var flowSolutionIds = new Dictionary<Guid, List<Guid>>();
                     foreach (var sc in solutionComponents.Entities)
                     {
                         var objId = GetGuidFromAttribute(sc, "objectid");
                         var solId = GetGuidFromAttribute(sc, "solutionid");
                         if (objId == Guid.Empty || solId == Guid.Empty) continue;
-                        if (!flowSolutions.ContainsKey(objId)) flowSolutions[objId] = new List<string>();
-                        if (solutionNames.ContainsKey(solId)) flowSolutions[objId].Add(solutionNames[solId]);
+                        if (!flowSolutionNames.ContainsKey(objId)) flowSolutionNames[objId] = new List<string>();
+                        if (!flowSolutionIds.ContainsKey(objId)) flowSolutionIds[objId] = new List<Guid>();
+                        if (solutionNames.ContainsKey(solId)) flowSolutionNames[objId].Add(solutionNames[solId]);
+                        flowSolutionIds[objId].Add(solId);
                     }
 
-                    var allSolutionNames = flowSolutions.SelectMany(kvp => kvp.Value).Distinct().OrderBy(s => s).ToList();
+                    var allSolutionNames = flowSolutionNames.SelectMany(kvp => kvp.Value).Distinct().OrderBy(s => s).ToList();
 
                     var results = new List<FlowInfo>();
                     var principalIds = new HashSet<Guid>();
@@ -335,8 +378,10 @@ namespace Flow_Finder
                             CreatedBy = GetEntityReferenceName(f, "createdby")
                         };
 
-                        if (flowSolutions.ContainsKey(f.Id)) { fi.InSolution = true; fi.Solutions = string.Join(", ", flowSolutions[f.Id].Distinct()); }
+                        if (flowSolutionNames.ContainsKey(f.Id)) { fi.InSolution = true; fi.Solutions = string.Join(", ", flowSolutionNames[f.Id].Distinct()); }
                         else fi.InSolution = false;
+                        // mark managed state if any containing solution is managed
+                        try { fi.IsInManagedSolution = flowSolutionIds.ContainsKey(f.Id) && flowSolutionIds[f.Id].Any(sid => solutionIsManaged.ContainsKey(sid) && solutionIsManaged[sid]); } catch { fi.IsInManagedSolution = false; }
 
                         try
                         {
@@ -491,9 +536,14 @@ namespace Flow_Finder
                         row["Triggering Source"] = f.TriggerSource ?? string.Empty;
                         row["Triggering Entity"] = f.TriggerEntity ?? string.Empty;
                         row["Other Data Sources"] = f.OtherDataSources ?? string.Empty;
+                        row["IsInManagedSolution"] = f.IsInManagedSolution;
                         flowsTable.Rows.Add(row);
                     }
                     dgvFlows.DataSource = flowsTable;
+                    // hide the helper column used for filtering
+                    try { if (dgvFlows.Columns.Contains("IsInManagedSolution")) dgvFlows.Columns["IsInManagedSolution"].Visible = false; } catch { }
+                    // apply current filters
+                    try { ApplyFilters(); } catch { }
 
                     for (int i = 0; i < dgvFlows.Rows.Count && i < lastResults.Count; i++)
                     {
@@ -568,13 +618,10 @@ namespace Flow_Finder
                         catch { }
                     }
 
-                    cmbSolutions.SelectedIndexChanged -= cmbSolutions_SelectedIndexChanged;
-                    cmbSolutions.SelectedIndexChanged -= cmbSolutions_SelectedIndexChanged;
                     try { cmbSolutions.ComboBox.DataSource = null; } catch { }
                     cmbSolutions.ComboBox.Items.Clear(); cmbSolutions.ComboBox.Items.Add("All solutions");
                     foreach (var sname in solutionNames) cmbSolutions.ComboBox.Items.Add(sname);
                     try { cmbSolutions.SelectedIndex = 0; } catch { cmbSolutions.ComboBox.SelectedIndex = 0; }
-                    cmbSolutions.SelectedIndexChanged += cmbSolutions_SelectedIndexChanged;
                 }
             });
         }
@@ -614,6 +661,9 @@ namespace Flow_Finder
                     try { cmbSolutions.ComboBox.Items.Clear(); } catch { }
                     cmbSolutions.ComboBox.Items.Add("All solutions");
                     cmbSolutions.SelectedIndex = 0;
+                    try { cmbSolutions.SelectedIndexChanged += new EventHandler((s,ev) => { try { if (cmbSolutions.SelectedIndex >= 0) ApplyFilters(); } catch { } }); } catch { }
+                    // initialize hide-managed button text to reflect current checked state
+                    try { if (chkHideManaged != null) chkHideManaged.Text = chkHideManaged.Checked ? "Show managed" : "Hide managed"; } catch { }
                 }
             }
             catch { }
@@ -840,7 +890,7 @@ namespace Flow_Finder
                             var solIds = scRes.Entities.Select(sc => GetGuidFromAttribute(sc, "solutionid")).Where(g => g != Guid.Empty).Distinct().ToArray();
                             if (solIds.Any())
                             {
-                                var solQ = new QueryExpression("solution") { ColumnSet = new ColumnSet("solutionid", "friendlyname", "uniquename") };
+                                var solQ = new QueryExpression("solution") { ColumnSet = new ColumnSet("solutionid", "friendlyname", "uniquename", "ismanaged") };
                                 solQ.Criteria.AddCondition("solutionid", ConditionOperator.In, solIds.Cast<object>().ToArray());
                                 var sols = Service.RetrieveMultiple(solQ);
                                 var names = sols.Entities.Select(s => s.GetAttributeValue<string>("friendlyname") ?? s.GetAttributeValue<string>("uniquename")).Where(n => !string.IsNullOrEmpty(n) && n.IndexOf("active solution", StringComparison.OrdinalIgnoreCase) < 0 && n.IndexOf("default solution", StringComparison.OrdinalIgnoreCase) < 0).ToList();
