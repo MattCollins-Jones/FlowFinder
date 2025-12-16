@@ -808,9 +808,22 @@ namespace Flow_Finder
             else row = dgvFlows.CurrentRow;
             if (row == null) { MessageBox.Show("Please select a flow in the list first.", "Info", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
             if (row.Tag == null || !(row.Tag is Guid flowId)) return;
-            using (var dlg = new ManageCoOwnersDialog(Service, flowId, s => LogInfo(s), s => LogWarning(s))) { dlg.ShowDialog(); }
-            // refresh according to settings
-            RefreshAccordingToSetting((Guid)row.Tag);
+            using (var dlg = new ManageCoOwnersDialog(Service, flowId, s => LogInfo(s), s => LogWarning(s)))
+            {
+                dlg.ShowDialog();
+                try
+                {
+                    // Wait briefly for any in-flight add/remove operation to complete so refresh sees changes
+                    dlg.LastOperation?.Wait(5000);
+                }
+                catch { }
+
+                // Only refresh if the dialog made changes
+                if (dlg.ChangesMade)
+                {
+                    RefreshAccordingToSetting((Guid)row.Tag);
+                }
+            }
         }
 
         private void tsbManageSolutions_Click(object sender, EventArgs e)
@@ -820,9 +833,20 @@ namespace Flow_Finder
             else row = dgvFlows.CurrentRow;
             if (row == null) { MessageBox.Show("Please select a flow in the list first.", "Info", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
             if (row.Tag == null || !(row.Tag is Guid flowId)) return;
-            using (var dlg = new ManageSolutionsDialog(Service, flowId, s => LogInfo(s), s => LogWarning(s))) { dlg.ShowDialog(); }
-            // refresh according to settings
-            RefreshAccordingToSetting((Guid)row.Tag);
+            try
+            {
+                using (var dlg = new ManageSolutionsDialog(Service, flowId, s => LogInfo(s), s => LogWarning(s)))
+                {
+                    dlg.ShowDialog();
+                    try { dlg.LastOperation?.Wait(5000); } catch { }
+                    if (dlg.ChangesMade) RefreshAccordingToSetting((Guid)row.Tag);
+                }
+            }
+            catch (Exception ex)
+            {
+                LogWarning("Manage solutions dialog failed: " + ex.Message);
+                try { MessageBox.Show("Failed to open Manage Solutions: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error); } catch { }
+            }
         }
 
         private void RefreshAccordingToSetting(Guid flowId)
@@ -852,58 +876,66 @@ namespace Flow_Finder
                             var resp = (RetrieveSharedPrincipalsAndAccessResponse)Service.Execute(req);
                             var principalIds = new List<Guid>();
                             if (resp?.PrincipalAccesses != null) foreach (var pa in resp.PrincipalAccesses) if (pa.Principal is EntityReference er) principalIds.Add(er.Id);
+
+                            // resolve principal names (users and teams) and detect disabled users
+                            var principalNames = new Dictionary<Guid, string>();
+                            var principalDisabled = new HashSet<Guid>();
                             if (principalIds.Any() || fi.OwnerId != Guid.Empty)
                             {
-                                // include owner id so we can detect primary owner disabled state as well
                                 var idsToQuery = new HashSet<Guid>(principalIds);
                                 if (fi.OwnerId != Guid.Empty) idsToQuery.Add(fi.OwnerId);
-                                var userQ = new QueryExpression("systemuser") { ColumnSet = new ColumnSet("systemuserid", "fullname", "isdisabled") };
-                                userQ.Criteria.AddCondition("systemuserid", ConditionOperator.In, idsToQuery.Cast<object>().ToArray());
-                                var users = Service.RetrieveMultiple(userQ);
-                                var names = new Dictionary<Guid, string>();
-                                foreach (var u in users.Entities)
+                                var idsArray = idsToQuery.ToArray();
+                                try
                                 {
-                                    var fullname = u.GetAttributeValue<string>("fullname");
-                                    // Append disabled marker only if not in exception list
-                                    try
+                                    var userQ = new QueryExpression("systemuser") { ColumnSet = new ColumnSet("systemuserid", "fullname", "isdisabled") };
+                                    userQ.Criteria.AddCondition("systemuserid", ConditionOperator.In, idsArray.Cast<object>().ToArray());
+                                    var users = Service.RetrieveMultiple(userQ);
+                                    foreach (var u in users.Entities)
                                     {
-                                        var isDisabled = u.Contains("isdisabled") && u.GetAttributeValue<bool>("isdisabled");
-                                        if (!string.IsNullOrEmpty(fullname) && DisabledUserExceptions.Contains(fullname.Trim())) isDisabled = false;
-                                        names[u.Id] = fullname ?? u.Id.ToString();
-                                        if (isDisabled) names[u.Id] += " (disabled)";
-                                    }
-                                    catch
-                                    {
-                                        names[u.Id] = fullname ?? u.Id.ToString();
+                                        var fullname = GetStringSafe(u, "fullname");
+                                        principalNames[u.Id] = fullname ?? u.Id.ToString();
+                                        bool isDisabled = false;
+                                        try { if (u.Contains("isdisabled")) isDisabled = u.GetAttributeValue<bool>("isdisabled"); } catch { }
+                                        try { if (!string.IsNullOrEmpty(fullname) && DisabledUserExceptions.Contains(fullname.Trim())) isDisabled = false; } catch { }
+                                        if (isDisabled) principalDisabled.Add(u.Id);
                                     }
                                 }
+                                catch { }
+
+                                try
+                                {
+                                    var teamQ = new QueryExpression("team") { ColumnSet = new ColumnSet("teamid", "name") };
+                                    teamQ.Criteria.AddCondition("teamid", ConditionOperator.In, idsArray.Cast<object>().ToArray());
+                                    var teams = Service.RetrieveMultiple(teamQ);
+                                    foreach (var t in teams.Entities) principalNames[t.Id] = GetStringSafe(t, "name");
+                                }
+                                catch { }
+
+                                // build co-owner display names excluding primary owner
+                                if (principalIds != null && principalIds.Any())
+                                {
+                                    var coIds = principalIds.Where(id => id != fi.OwnerId).Distinct().ToList();
+                                    var coNames = new List<string>();
+                                    foreach (var id in coIds)
+                                    {
+                                        var name = principalNames.ContainsKey(id) ? principalNames[id] : id.ToString();
+                                        if (principalDisabled.Contains(id)) name += " (disabled)";
+                                        coNames.Add(name);
+                                    }
+                                    fi.CoOwners = coNames.Any() ? string.Join(", ", coNames) : null;
+                                }
+                                else fi.CoOwners = null;
+
+                                // prefer resolved name for primary owner and annotate if disabled
+                                try
+                                {
+                                    if (fi.OwnerId != Guid.Empty && principalNames.ContainsKey(fi.OwnerId)) fi.Owner = principalNames[fi.OwnerId];
+                                    if (fi.OwnerId != Guid.Empty && principalDisabled.Contains(fi.OwnerId)) fi.Owner = (fi.Owner ?? string.Empty) + " (disabled)";
+                                }
+                                catch { }
                             }
                         }
-                        catch { }
-
-                        try
-                        {
-                            var scQ = new QueryExpression("solutioncomponent") { ColumnSet = new ColumnSet("solutionid", "objectid", "componenttype") };
-                            scQ.Criteria.AddCondition("componenttype", ConditionOperator.Equal, 29);
-                            scQ.Criteria.AddCondition("objectid", ConditionOperator.Equal, flowId);
-                            var scRes = Service.RetrieveMultiple(scQ);
-                            var solIds = scRes.Entities.Select(sc => GetGuidFromAttribute(sc, "solutionid")).Where(g => g != Guid.Empty).Distinct().ToArray();
-                            if (solIds.Any())
-                            {
-                                var solQ = new QueryExpression("solution") { ColumnSet = new ColumnSet("solutionid", "friendlyname", "uniquename", "ismanaged") };
-                                solQ.Criteria.AddCondition("solutionid", ConditionOperator.In, solIds.Cast<object>().ToArray());
-                                var sols = Service.RetrieveMultiple(solQ);
-                                var names = sols.Entities.Select(s => s.GetAttributeValue<string>("friendlyname") ?? s.GetAttributeValue<string>("uniquename")).Where(n => !string.IsNullOrEmpty(n) && n.IndexOf("active solution", StringComparison.OrdinalIgnoreCase) < 0 && n.IndexOf("default solution", StringComparison.OrdinalIgnoreCase) < 0).ToList();
-                                fi.Solutions = names.Any() ? string.Join(", ", names) : null;
-                            }
-                        }
-                        catch { }
-
-                        try
-                        {
-                            if (wf != null && wf.Attributes.ContainsKey("clientdata")) ParseClientData(GetStringSafe(wf, "clientdata"), fi);
-                        }
-                        catch { }
+                        catch (Exception ex) { a.Result = ex; return; }
                     }
                     catch (Exception ex) { a.Result = ex; return; }
                     a.Result = new { Flow = fi, DisabledPrincipalIds = disabledSet.ToArray() };
@@ -975,6 +1007,9 @@ namespace Flow_Finder
         {
             private IOrganizationService _service; private Guid _flowId; private Action<string> _logInfo; private Action<string> _logWarn;
             private ListBox lbCoOwners; private ComboBox cbUsers; private Button btnAdd; private Button btnRemove; private Button btnClose;
+            private Task _lastOperation = Task.CompletedTask;
+            public Task LastOperation => _lastOperation;
+            public bool ChangesMade { get; private set; } = false;
 
             public ManageCoOwnersDialog(IOrganizationService service, Guid flowId, Action<string> logInfo = null, Action<string> logWarn = null)
             {
@@ -1035,13 +1070,45 @@ namespace Flow_Finder
                     if (disabledSetLocal.Contains(id)) display += " (disabled)";
                     lbCoOwners.Items.Add(new ListItem { Id = id, Name = display });
                 }
+
+                // Populate users combobox with available users (exclude existing principals and disabled users)
+                try
+                {
+                    var available = new List<ListItem>();
+                    var userQAll = new QueryExpression("systemuser") { ColumnSet = new ColumnSet("systemuserid", "fullname", "isdisabled") };
+                    // retrieve only enabled users to avoid listing disabled accounts
+                    userQAll.Criteria.AddCondition("isdisabled", ConditionOperator.Equal, false);
+                    var allUsers = _service.RetrieveMultiple(userQAll);
+                    if (allUsers != null && allUsers.Entities != null)
+                    {
+                        foreach (var u in allUsers.Entities)
+                        {
+                            var uid = u.Id;
+                            if (principalIds.Contains(uid)) continue; // skip already-shared principals
+                            var fullname = string.Empty;
+                            try { fullname = u.GetAttributeValue<string>("fullname") ?? uid.ToString(); } catch { fullname = uid.ToString(); }
+                            available.Add(new ListItem { Id = uid, Name = fullname });
+                        }
+                    }
+                    available = available.OrderBy(x => x.Name).ToList();
+                    if (available.Any())
+                    {
+                        cbUsers.DisplayMember = "Name";
+                        cbUsers.ValueMember = "Id";
+                        cbUsers.DataSource = available;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logWarn("Failed to load available users: " + ex.Message);
+                }
             }
 
             private void BtnAdd_Click(object sender, EventArgs e)
             {
                 var sel = cbUsers.SelectedItem as ListItem; if (sel == null) { MessageBox.Show("Select a user to add."); return; }
                 btnAdd.Enabled = false; btnRemove.Enabled = false; cbUsers.Enabled = false; lbCoOwners.Enabled = false; var busy = new BusyForm("Adding co-owner..."); busy.Show(this);
-                Task.Run(() =>
+                var op = Task.Run(() =>
                 {
                     try
                     {
@@ -1054,30 +1121,32 @@ namespace Flow_Finder
                 {
                     try { busy.Close(); } catch { }
                     btnAdd.Enabled = true; btnRemove.Enabled = true; cbUsers.Enabled = true; lbCoOwners.Enabled = true;
-                    if (t.Result == null) { _logInfo($"Added co-owner {sel.Name}"); MessageBox.Show("Added co-owner."); }
+                    if (t.Result == null) { _logInfo($"Added co-owner {sel.Name}"); MessageBox.Show("Added co-owner."); ChangesMade = true; }
                     else { _logWarn("Failed to add co-owner: " + t.Result.Message); MessageBox.Show("Failed to add co-owner: " + t.Result.Message); }
                     LoadData();
                 }, TaskScheduler.FromCurrentSynchronizationContext());
-            }
+                _lastOperation = op;
+             }
 
-            private void BtnRemove_Click(object sender, EventArgs e)
-            {
-                var sel = lbCoOwners.SelectedItem as ListItem; if (sel == null) { MessageBox.Show("Select a co-owner to remove."); return; }
-                var confirm = MessageBox.Show($"Are you sure you want to remove co-owner '{sel.Name}'?", "Confirm remove", MessageBoxButtons.YesNo, MessageBoxIcon.Question); if (confirm != DialogResult.Yes) return;
-                btnAdd.Enabled = false; btnRemove.Enabled = false; cbUsers.Enabled = false; lbCoOwners.Enabled = false; var busy = new BusyForm("Removing co-owner..."); busy.Show(this);
-                Task.Run(() =>
-                {
-                    try { var revoke = new RevokeAccessRequest { Target = new EntityReference("workflow", _flowId), Revokee = new EntityReference("systemuser", sel.Id) }; _service.Execute(revoke); return (Exception)null; }
-                    catch (Exception ex) { return ex; }
-                }).ContinueWith(t =>
-                {
-                    try { busy.Close(); } catch { }
-                    btnAdd.Enabled = true; btnRemove.Enabled = true; cbUsers.Enabled = true; lbCoOwners.Enabled = true;
-                    if (t.Result == null) { _logInfo($"Removed co-owner {sel.Name}"); MessageBox.Show("Removed co-owner."); }
-                    else { _logWarn("Failed to remove co-owner: " + t.Result.Message); MessageBox.Show("Failed to remove co-owner: " + t.Result.Message); }
-                    LoadData();
-                }, TaskScheduler.FromCurrentSynchronizationContext());
-            }
+             private void BtnRemove_Click(object sender, EventArgs e)
+             {
+                 var sel = lbCoOwners.SelectedItem as ListItem; if (sel == null) { MessageBox.Show("Select a co-owner to remove."); return; }
+                 var confirm = MessageBox.Show($"Are you sure you want to remove co-owner '{sel.Name}'?", "Confirm remove", MessageBoxButtons.YesNo, MessageBoxIcon.Question); if (confirm != DialogResult.Yes) return;
+                 btnAdd.Enabled = false; btnRemove.Enabled = false; cbUsers.Enabled = false; lbCoOwners.Enabled = false; var busy = new BusyForm("Removing co-owner..."); busy.Show(this);
+                 var op = Task.Run(() =>
+                 {
+                     try { var revoke = new RevokeAccessRequest { Target = new EntityReference("workflow", _flowId), Revokee = new EntityReference("systemuser", sel.Id) }; _service.Execute(revoke); return (Exception)null; }
+                     catch (Exception ex) { return ex; }
+                 }).ContinueWith(t =>
+                 {
+                     try { busy.Close(); } catch { }
+                     btnAdd.Enabled = true; btnRemove.Enabled = true; cbUsers.Enabled = true; lbCoOwners.Enabled = true;
+                     if (t.Result == null) { _logInfo($"Removed co-owner {sel.Name}"); MessageBox.Show("Removed co-owner."); ChangesMade = true; }
+                     else { _logWarn("Failed to remove co-owner: " + t.Result.Message); MessageBox.Show("Failed to remove co-owner: " + t.Result.Message); }
+                     LoadData();
+                 }, TaskScheduler.FromCurrentSynchronizationContext());
+                 _lastOperation = op;
+             }
 
             private class ListItem { public Guid Id { get; set; } public string Name { get; set; } public override string ToString() => Name; }
         }
@@ -1086,6 +1155,9 @@ namespace Flow_Finder
         {
             private IOrganizationService _service; private Guid _flowId; private Action<string> _logInfo; private Action<string> _logWarn;
             private ListBox lbSolutions; private ComboBox cbAvailableSolutions; private Button btnAddToSolution; private Button btnRemoveFromSolution; private Button btnClose;
+            private Task _lastOperation = Task.CompletedTask;
+            public Task LastOperation => _lastOperation;
+            public bool ChangesMade { get; private set; } = false;
 
             public ManageSolutionsDialog(IOrganizationService svc, Guid flowId, Action<string> logInfo = null, Action<string> logWarn = null) { _service = svc; _flowId = flowId; _logInfo = logInfo ?? (_ => { }); _logWarn = logWarn ?? (_ => { }); Initialize(); LoadData(); }
 
@@ -1146,16 +1218,18 @@ namespace Flow_Finder
             {
                 var sel = cbAvailableSolutions.SelectedItem as SolutionItem; if (sel == null) { MessageBox.Show("Select a solution to add the flow to."); return; }
                 var busy = new BusyForm("Adding flow to solution..."); busy.Show(this);
-                Task.Run(() => { try { var req = new AddSolutionComponentRequest { SolutionUniqueName = sel.UniqueName, ComponentType = 29, ComponentId = _flowId }; _service.Execute(req); return (Exception)null; } catch (Exception ex) { return ex; } }).ContinueWith(t => { try { busy.Close(); } catch { } if (t.Result == null) { MessageBox.Show("Flow added to solution."); } else { MessageBox.Show("Failed to add flow to solution: " + t.Result.Message); } LoadData(); }, TaskScheduler.FromCurrentSynchronizationContext());
-            }
+                var op = Task.Run(() => { try { var req = new AddSolutionComponentRequest { SolutionUniqueName = sel.UniqueName, ComponentType = 29, ComponentId = _flowId }; _service.Execute(req); return (Exception)null; } catch (Exception ex) { return ex; } }).ContinueWith(t => { try { busy.Close(); } catch { } if (t.Result == null) { MessageBox.Show("Flow added to solution."); ChangesMade = true; } else { MessageBox.Show("Failed to add flow to solution: " + t.Result.Message); } LoadData(); }, TaskScheduler.FromCurrentSynchronizationContext());
+                _lastOperation = op;
+             }
 
-            private void BtnRemoveFromSolution_Click(object sender, EventArgs e)
-            {
-                var sel = lbSolutions.SelectedItem as SolutionItem; if (sel == null) { MessageBox.Show("Select a solution to remove the flow from."); return; }
-                var confirm = MessageBox.Show($"Remove flow from solution '{sel.FriendlyName}'?", "Confirm", MessageBoxButtons.YesNo, MessageBoxIcon.Question); if (confirm != DialogResult.Yes) return;
-                var busy = new BusyForm("Removing flow from solution..."); busy.Show(this);
-                Task.Run(() => { try { var req = new RemoveSolutionComponentRequest { SolutionUniqueName = sel.UniqueName, ComponentType = 29, ComponentId = _flowId }; _service.Execute(req); return (Exception)null; } catch (Exception ex) { return ex; } }).ContinueWith(t => { try { busy.Close(); } catch { } if (t.Result == null) { MessageBox.Show("Flow removed from solution."); } else { MessageBox.Show("Failed to remove flow from solution: " + t.Result.Message); } LoadData(); }, TaskScheduler.FromCurrentSynchronizationContext());
-            }
+             private void BtnRemoveFromSolution_Click(object sender, EventArgs e)
+             {
+                 var sel = lbSolutions.SelectedItem as SolutionItem; if (sel == null) { MessageBox.Show("Select a solution to remove the flow from."); return; }
+                 var confirm = MessageBox.Show($"Remove flow from solution '{sel.FriendlyName}'?", "Confirm", MessageBoxButtons.YesNo, MessageBoxIcon.Question); if (confirm != DialogResult.Yes) return;
+                 var busy = new BusyForm("Removing flow from solution..."); busy.Show(this);
+                 var op = Task.Run(() => { try { var req = new RemoveSolutionComponentRequest { SolutionUniqueName = sel.UniqueName, ComponentType = 29, ComponentId = _flowId }; _service.Execute(req); return (Exception)null; } catch (Exception ex) { return ex; } }).ContinueWith(t => { try { busy.Close(); } catch { } if (t.Result == null) { MessageBox.Show("Flow removed from solution."); ChangesMade = true; } else { MessageBox.Show("Failed to remove flow from solution: " + t.Result.Message); } LoadData(); }, TaskScheduler.FromCurrentSynchronizationContext());
+                 _lastOperation = op;
+             }
 
             private class SolutionItem { public Guid Id { get; set; } public string FriendlyName { get; set; } public string UniqueName { get; set; } public bool IsManaged { get; set; } public override string ToString() => FriendlyName; }
         }

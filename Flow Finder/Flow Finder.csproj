@@ -198,9 +198,8 @@
     <Reference Include="System.Data.DataSetExtensions" />
     <Reference Include="Microsoft.CSharp" />
     <Reference Include="System.Data" />
-    <Reference Include="System.Xml" />
-    <Reference Include="Microsoft.VisualStudio.CoreUtility">
-      <Private>False</Private>
+    <Reference Include="System.Xml">
+    <Private>False</Private>
     </Reference>
     <Reference Include="PresentationFramework" />
     <Reference Include="System" />
@@ -256,6 +255,9 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="app.config" />
+    <None Include="FlowFinder.nuspec" />
+    <None Include="nuget\create-and-push.ps1" />
+    <None Include="nuget\push-nuget.ps1" />
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>

@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<package>
+  <metadata>
+    <id>FlowFinder</id>
+    <version>1.2025.12.14</version>
+    <title>Flow Finder</title>
+    <authors>Matt Collins-Jones</authors>
+    <owners>Matt Collins-Jones</owners>
+    <projectUrl>https://github.com/MattCollins-Jones/FlowFinder</projectUrl>
+    <icon>icon.png</icon>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <description>Find the solutions that contain the flows, update co-owners and solutions, filter by solution, hide/show managed solutions and export flows to CSV.</description>
+    <summary>Find the solutions that contain the flows and manage co-owners/solutions. Includes filtering and CSV export.</summary>
+    <releaseNotes>Initial release. Tool includes the ability to:
+
+ - Find the solutions a flow is within
+ - Update the Co-owners
+ - Update the Solutions
+ - Filter based on Solution
+ - Export Flows to a CSV file
+ - Hide/show flows in managed solutions
+</releaseNotes>
+<license type="expression">MIT</license>
+    <tags>XrmToolBox Cloud Flows Power Automate Power Platform</tags>
+  </metadata>
+  <files>
+    <file src="icon.png" target="images\" />
+    <file src="bin\Release\FlowFinder.dll" target="lib\net48" />
+  </files>
+</package>
