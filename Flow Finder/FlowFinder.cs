@@ -13,7 +13,7 @@ namespace Flow_Finder
     // To generate Base64 string for Images below, you can use https://www.base64-image.de/
     [Export(typeof(IXrmToolBoxPlugin)),
         ExportMetadata("Name", "Flow Finder"),
-        ExportMetadata("Version", "1.0.0.0"),
+        ExportMetadata("Version", "1.2025.12.22"),
         ExportMetadata("Author", "Matt Collins-Jones"),
         ExportMetadata("Company", "Matt Collins-Jones"),
         ExportMetadata("Description", "Find Flows in Solutions, export them, add or remove solutions and Co-owners"),

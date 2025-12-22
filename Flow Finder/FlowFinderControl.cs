@@ -54,6 +54,28 @@ namespace Flow_Finder
             AppDomain.CurrentDomain.FirstChanceException += CurrentDomain_FirstChanceException;
             InitializeComponent();
             InitializeFlowsTable();
+            dgvFlows.DataBindingComplete += DgvFlows_DataBindingComplete;
+        }
+
+        private void DgvFlows_DataBindingComplete(object sender, DataGridViewBindingCompleteEventArgs e)
+        {
+            if (lastResults == null || lastResults.Count == 0) return;
+
+            foreach (DataGridViewRow row in dgvFlows.Rows)
+            {
+                if (row.IsNewRow) continue;
+                var rowView = row.DataBoundItem as DataRowView;
+                if (rowView == null) continue;
+
+                var name = rowView["Name"] as string;
+                if (string.IsNullOrEmpty(name)) continue;
+
+                var flowInfo = lastResults.FirstOrDefault(f => f.Name == name);
+                if (flowInfo != null)
+                {
+                    row.Tag = flowInfo.Id;
+                }
+            }
         }
 
         private void CurrentDomain_FirstChanceException(object sender, FirstChanceExceptionEventArgs e)
