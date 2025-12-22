@@ -28,6 +28,7 @@ namespace Flow_Finder
         private Settings mySettings;
         private DataTable flowsTable;
         private List<FlowInfo> lastResults = new List<FlowInfo>();
+        private Dictionary<string, bool> _solutionManagedStatus = new Dictionary<string, bool>();
 
         private class FlowInfo
         {
@@ -62,7 +63,10 @@ namespace Flow_Finder
                 var log = Path.Combine(Path.GetTempPath(), "FlowFinder_FirstChance.log");
                 File.AppendAllText(log, DateTime.Now.ToString("o") + " - " + e.Exception.ToString() + Environment.NewLine + Environment.NewLine);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                LogWarning("Failed to write to first-chance log: " + ex.Message);
+            }
         }
 
         private void InitializeFlowsTable()
@@ -191,7 +195,10 @@ namespace Flow_Finder
                     fi.OtherDataSources = string.Join(", ", names);
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                LogWarning($"Failed to parse client data: {ex.Message}");
+            }
         }
 
         private string MapTriggerTypeToSource(string type, Newtonsoft.Json.Linq.JObject trigObj)
@@ -276,9 +283,44 @@ namespace Flow_Finder
             {
                 // Update label to indicate the action that pressing the button will perform
                 try { if (chkHideManaged != null) chkHideManaged.Text = chkHideManaged.Checked ? "Show managed" : "Hide managed"; } catch { }
+
+                // Apply filters to the flows table
                 ApplyFilters();
+
+                // Update the solution dropdown filter to show/hide managed solutions
+                if (cmbSolutions != null && cmbSolutions.ComboBox != null)
+                {
+                    var allSolutions = _solutionManagedStatus.Keys.OrderBy(s => s).ToList();
+                    cmbSolutions.ComboBox.Items.Clear();
+                    cmbSolutions.ComboBox.Items.Add("All solutions");
+
+                    if (chkHideManaged.Checked)
+                    {
+                        // Exclude managed solutions
+                        foreach (var solution in allSolutions)
+                        {
+                            if (!_solutionManagedStatus.ContainsKey(solution) || !_solutionManagedStatus[solution])
+                            {
+                                cmbSolutions.ComboBox.Items.Add(solution);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        // Include all solutions
+                        foreach (var solution in allSolutions)
+                        {
+                            cmbSolutions.ComboBox.Items.Add(solution);
+                        }
+                    }
+
+                    cmbSolutions.SelectedIndex = 0;
+                }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                LogWarning($"Error in chkHideManaged_Click: {ex.Message}");
+            }
         }
 
         private void btnRefresh_Click(object sender, EventArgs e)
@@ -336,6 +378,7 @@ namespace Flow_Finder
                         var solFetch = new QueryExpression("solution") { ColumnSet = new ColumnSet("solutionid", "friendlyname", "uniquename", "ismanaged") };
                         solFetch.Criteria.AddCondition("solutionid", ConditionOperator.In, solutionIds.Select(g => (object)g).ToArray());
                         var sols = Service.RetrieveMultiple(solFetch);
+                        _solutionManagedStatus.Clear();
                         foreach (var s in sols.Entities)
                         {
                             var friendly = GetStringSafe(s, "friendlyname") ?? GetStringSafe(s, "uniquename");
@@ -343,7 +386,13 @@ namespace Flow_Finder
                             if (!string.IsNullOrEmpty(uniq) && uniq.Equals("default", StringComparison.OrdinalIgnoreCase)) continue;
                             if (!string.IsNullOrEmpty(friendly) && (friendly.IndexOf("default solution", StringComparison.OrdinalIgnoreCase) >= 0 || friendly.IndexOf("active solution", StringComparison.OrdinalIgnoreCase) >= 0)) continue;
                             solutionNames[s.Id] = friendly;
-                            try { solutionIsManaged[s.Id] = s.GetAttributeValue<bool?>("ismanaged") ?? false; } catch { solutionIsManaged[s.Id] = false; }
+                            bool isManaged = false;
+                            try { isManaged = s.GetAttributeValue<bool?>("ismanaged") ?? false; } catch { }
+                            solutionIsManaged[s.Id] = isManaged;
+                            if (!string.IsNullOrEmpty(friendly) && !_solutionManagedStatus.ContainsKey(friendly))
+                            {
+                                _solutionManagedStatus.Add(friendly, isManaged);
+                            }
                         }
                     }
 
@@ -505,7 +554,10 @@ namespace Flow_Finder
                                 ParseClientData(clientJson, fi);
                             }
                         }
-                        catch { }
+                        catch (Exception ex)
+                        {
+                            LogWarning($"Failed to retrieve clientdata for flow {fi.Id}: {ex.Message}");
+                        }
                     }
 
                     args.Result = new { Results = results, Solutions = allSolutionNames, DisabledPrincipalIds = principalDisabled.ToArray() };
@@ -821,7 +873,7 @@ namespace Flow_Finder
                 // Only refresh if the dialog made changes
                 if (dlg.ChangesMade)
                 {
-                    RefreshAccordingToSetting((Guid)row.Tag);
+                    RefreshAccordingtoSetting((Guid)row.Tag);
                 }
             }
         }
@@ -839,7 +891,7 @@ namespace Flow_Finder
                 {
                     dlg.ShowDialog();
                     try { dlg.LastOperation?.Wait(5000); } catch { }
-                    if (dlg.ChangesMade) RefreshAccordingToSetting((Guid)row.Tag);
+                    if (dlg.ChangesMade) RefreshAccordingtoSetting((Guid)row.Tag);
                 }
             }
             catch (Exception ex)
@@ -849,7 +901,7 @@ namespace Flow_Finder
             }
         }
 
-        private void RefreshAccordingToSetting(Guid flowId)
+        private void RefreshAccordingtoSetting(Guid flowId)
         {
             var mode = mySettings?.RefreshAfterDialogMode ?? Flow_Finder.RefreshMode.RefreshFlow;
             if (mode == Flow_Finder.RefreshMode.RefreshAll) ExecuteMethod(FindCloudFlows);
@@ -900,7 +952,7 @@ namespace Flow_Finder
                                         if (isDisabled) principalDisabled.Add(u.Id);
                                     }
                                 }
-                                catch { }
+                                catch (Exception ex) { LogWarning("Failed to resolve user names: " + ex.Message); }
 
                                 try
                                 {
@@ -909,7 +961,7 @@ namespace Flow_Finder
                                     var teams = Service.RetrieveMultiple(teamQ);
                                     foreach (var t in teams.Entities) principalNames[t.Id] = GetStringSafe(t, "name");
                                 }
-                                catch { }
+                                catch (Exception ex) { LogWarning("Failed to resolve team names: " + ex.Message); }
 
                                 // build co-owner display names excluding primary owner
                                 if (principalIds != null && principalIds.Any())
