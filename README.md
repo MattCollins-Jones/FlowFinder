@@ -47,6 +47,13 @@ Contributing
 
 - Issues and pull requests are welcome. Open them on the project repository: https://github.com/MattCollins-Jones/FlowFinder
 
+Changelog (v1.2025.12.22)
+
+- **New**: "Triggering Entity" column renamed to "Triggering Table". - Thanks Cooky!
+- **New**: "Show/Hide Managed" button now also filters the solutions dropdown. - Thanks Cooky! 
+- **Fix**: Resolved an issue where management buttons became unresponsive after filtering the grid.- Thanks Andrew!
+- **Improvement**: Enhanced exception handling with more detailed logging.
+
 Changelog (Initial release)
 
 - Initial release includes the ability to:
