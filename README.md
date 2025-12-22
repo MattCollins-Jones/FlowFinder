@@ -37,7 +37,7 @@ Typical CSV export fields
 - Solution Name(s)
 - Co-Owners
 - Triggering Source
-- Triggering Entity
+- Triggering Table
 
 License
 
@@ -60,4 +60,5 @@ Changelog (Initial release)
 Contact / Links
 
 - Repository: https://github.com/MattCollins-Jones/FlowFinder
+
 

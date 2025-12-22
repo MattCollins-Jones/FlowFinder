@@ -74,7 +74,7 @@ namespace Flow_Finder
             flowsTable.Columns.Add("Primary Owner");
             flowsTable.Columns.Add("Co-Owners");
             flowsTable.Columns.Add("Triggering Source");
-            flowsTable.Columns.Add("Triggering Entity");
+            flowsTable.Columns.Add("Triggering Table"); // Updated from "Triggering Entity"
             flowsTable.Columns.Add("Other Data Sources");
             // hidden flag column used for filtering (added at end so existing column indexes remain stable)
             flowsTable.Columns.Add("IsInManagedSolution", typeof(bool));
@@ -534,7 +534,7 @@ namespace Flow_Finder
                         row["Primary Owner"] = f.Owner ?? string.Empty;
                         row["Co-Owners"] = f.CoOwners ?? string.Empty;
                         row["Triggering Source"] = f.TriggerSource ?? string.Empty;
-                        row["Triggering Entity"] = f.TriggerEntity ?? string.Empty;
+                        row["Triggering Table"] = f.TriggerEntity ?? string.Empty;
                         row["Other Data Sources"] = f.OtherDataSources ?? string.Empty;
                         row["IsInManagedSolution"] = f.IsInManagedSolution;
                         flowsTable.Rows.Add(row);
@@ -726,7 +726,7 @@ namespace Flow_Finder
 
                 using (var writer = new StreamWriter(sfd.FileName, false, Encoding.UTF8))
                 {
-                    writer.WriteLine("Name,Description,Solutions,Primary Owner,Co-Owners,Triggering Source,Triggering Entity,Other Data Sources");
+                    writer.WriteLine("Name,Description,Solutions,Primary Owner,Co-Owners,Triggering Source,Triggering Table,Other Data Sources");
                     foreach (DataGridViewRow row in dgvFlows.Rows)
                     {
                         if (row.IsNewRow) continue;
