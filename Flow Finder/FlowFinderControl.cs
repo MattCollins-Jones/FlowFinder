@@ -47,6 +47,22 @@ namespace Flow_Finder
             public string TriggerSource { get; set; }
             public string TriggerEntity { get; set; }
             public string OtherDataSources { get; set; }
+            public string Status { get; set; }
+        }
+
+        private string MapStateCodeToStatus(int stateCode)
+        {
+            switch (stateCode)
+            {
+                case 0:
+                    return "Inactive";
+                case 1:
+                    return "Active";
+                case 2:
+                    return "Suspended";
+                default:
+                    return "Unknown";
+            }
         }
 
         public FlowFinderControl()
@@ -95,6 +111,7 @@ namespace Flow_Finder
         {
             flowsTable = new DataTable();
             flowsTable.Columns.Add("Name");
+            flowsTable.Columns.Add("Status");
             flowsTable.Columns.Add("Description");
             flowsTable.Columns.Add("Solutions");
             flowsTable.Columns.Add("Primary Owner");
@@ -369,21 +386,21 @@ namespace Flow_Finder
                 Work = (worker, args) =>
                 {
                     LogInfo("Starting retrieval of cloud flows and solutions");
-                    var qe = new QueryExpression("workflow") { ColumnSet = new ColumnSet("workflowid", "name", "ownerid", "type", "category", "description", "createdby"), Criteria = new FilterExpression() };
+                    var qe = new QueryExpression("workflow") { ColumnSet = new ColumnSet("workflowid", "name", "ownerid", "type", "category", "description", "createdby", "statecode"), Criteria = new FilterExpression() };
                     qe.Criteria.AddCondition("type", ConditionOperator.Equal, 1);
                     qe.Criteria.AddCondition("category", ConditionOperator.Equal, 6);
                     var flows = Service.RetrieveMultiple(qe);
 
                     if (flows == null || flows.Entities.Count == 0)
                     {
-                        var qe2 = new QueryExpression("workflow") { ColumnSet = new ColumnSet("workflowid", "name", "ownerid", "type", "category", "description", "createdby"), Criteria = new FilterExpression() };
+                        var qe2 = new QueryExpression("workflow") { ColumnSet = new ColumnSet("workflowid", "name", "ownerid", "type", "category", "description", "createdby", "statecode"), Criteria = new FilterExpression() };
                         qe2.Criteria.AddCondition("type", ConditionOperator.Equal, 1);
                         qe2.Criteria.AddCondition("category", ConditionOperator.In, new object[] { 5, 6, 7 });
                         flows = Service.RetrieveMultiple(qe2);
                     }
                     if (flows == null || flows.Entities.Count == 0)
                     {
-                        var qe3 = new QueryExpression("workflow") { ColumnSet = new ColumnSet("workflowid", "name", "ownerid", "type", "category", "description", "createdby") };
+                        var qe3 = new QueryExpression("workflow") { ColumnSet = new ColumnSet("workflowid", "name", "ownerid", "type", "category", "description", "createdby", "statecode") };
                         qe3.Criteria.AddCondition("type", ConditionOperator.Equal, 1);
                         flows = Service.RetrieveMultiple(qe3);
                     }
@@ -439,6 +456,7 @@ namespace Flow_Finder
 
                     foreach (var f in flows.Entities)
                     {
+                        var stateCode = f.Contains("statecode") ? f.GetAttributeValue<OptionSetValue>("statecode").Value : -1;
                         var fi = new FlowInfo
                         {
                             Id = f.Id,
@@ -446,7 +464,8 @@ namespace Flow_Finder
                             Owner = GetEntityReferenceName(f, "ownerid"),
                             OwnerId = GetGuidFromAttribute(f, "ownerid"),
                             Description = GetStringSafe(f, "description"),
-                            CreatedBy = GetEntityReferenceName(f, "createdby")
+                            CreatedBy = GetEntityReferenceName(f, "createdby"),
+                            Status = MapStateCodeToStatus(stateCode)
                         };
 
                         if (flowSolutionNames.ContainsKey(f.Id)) { fi.InSolution = true; fi.Solutions = string.Join(", ", flowSolutionNames[f.Id].Distinct()); }
@@ -603,6 +622,7 @@ namespace Flow_Finder
                     {
                         var row = flowsTable.NewRow();
                         row["Name"] = f.Name ?? string.Empty;
+                        row["Status"] = f.Status ?? string.Empty;
                         row["Description"] = f.Description ?? string.Empty;
                         row["Solutions"] = f.Solutions ?? string.Empty;
                         row["Primary Owner"] = f.Owner ?? string.Empty;
@@ -800,12 +820,12 @@ namespace Flow_Finder
 
                 using (var writer = new StreamWriter(sfd.FileName, false, Encoding.UTF8))
                 {
-                    writer.WriteLine("Name,Description,Solutions,Primary Owner,Co-Owners,Triggering Source,Triggering Table,Other Data Sources");
+                    writer.WriteLine("Name,Status,Description,Solutions,Primary Owner,Co-Owners,Triggering Source,Triggering Table,Other Data Sources");
                     foreach (DataGridViewRow row in dgvFlows.Rows)
                     {
                         if (row.IsNewRow) continue;
                         var vals = new List<string>();
-                        for (int i = 0; i < 8; i++) vals.Add(EscapeCsv(Convert.ToString(row.Cells[i].Value ?? string.Empty)));
+                        for (int i = 0; i < 9; i++) vals.Add(EscapeCsv(Convert.ToString(row.Cells[i].Value ?? string.Empty)));
                         writer.WriteLine(string.Join(",", vals));
                     }
                 }
@@ -941,8 +961,10 @@ namespace Flow_Finder
                     var disabledSet = new HashSet<Guid>();
                     try
                     {
-                        var wf = Service.Retrieve("workflow", flowId, new ColumnSet("workflowid", "name", "ownerid", "description", "createdby", "clientdata"));
+                        var wf = Service.Retrieve("workflow", flowId, new ColumnSet("workflowid", "name", "ownerid", "description", "createdby", "clientdata", "statecode"));
+                        var stateCode = wf.Contains("statecode") ? wf.GetAttributeValue<OptionSetValue>("statecode").Value : -1;
                         fi.Id = wf.Id; fi.Name = GetStringSafe(wf, "name"); fi.Description = GetStringSafe(wf, "description"); fi.Owner = GetEntityReferenceName(wf, "ownerid"); fi.OwnerId = GetGuidFromAttribute(wf, "ownerid"); fi.CreatedBy = GetEntityReferenceName(wf, "createdby");
+                        fi.Status = MapStateCodeToStatus(stateCode);
 
                         try
                         {
@@ -1024,8 +1046,13 @@ namespace Flow_Finder
                     {
                         if (row.Tag is Guid id && id == fi.Id)
                         {
-                            row.Cells[0].Value = fi.Name; row.Cells[1].Value = fi.Description ?? ""; row.Cells[2].Value = fi.Solutions ?? ""; row.Cells[3].Value = fi.Owner ?? ""; row.Cells[4].Value = fi.CoOwners ?? "";
-                            try { row.Cells[4].ToolTipText = fi.CoOwners ?? string.Empty; } catch { }
+                            row.Cells[0].Value = fi.Name;
+                            row.Cells[1].Value = fi.Status ?? "";
+                            row.Cells[2].Value = fi.Description ?? "";
+                            row.Cells[3].Value = fi.Solutions ?? "";
+                            row.Cells[4].Value = fi.Owner ?? "";
+                            row.Cells[5].Value = fi.CoOwners ?? "";
+                            try { row.Cells[5].ToolTipText = fi.CoOwners ?? string.Empty; } catch { }
                             try
                             {
                                 bool hasDisabled = false;
