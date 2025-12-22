@@ -48,6 +48,7 @@ namespace Flow_Finder
             public string TriggerEntity { get; set; }
             public string OtherDataSources { get; set; }
             public string Status { get; set; }
+            public string LinkToFlow { get; set; }
         }
 
         private string MapStateCodeToStatus(int stateCode)
@@ -111,14 +112,15 @@ namespace Flow_Finder
         {
             flowsTable = new DataTable();
             flowsTable.Columns.Add("Name");
-            flowsTable.Columns.Add("Status");
             flowsTable.Columns.Add("Description");
             flowsTable.Columns.Add("Solutions");
             flowsTable.Columns.Add("Primary Owner");
             flowsTable.Columns.Add("Co-Owners");
             flowsTable.Columns.Add("Triggering Source");
-            flowsTable.Columns.Add("Triggering Table"); // Updated from "Triggering Entity"
+            flowsTable.Columns.Add("Triggering Table");
             flowsTable.Columns.Add("Other Data Sources");
+            flowsTable.Columns.Add("Link to Flow");
+            flowsTable.Columns.Add("Status");
             // hidden flag column used for filtering (added at end so existing column indexes remain stable)
             flowsTable.Columns.Add("IsInManagedSolution", typeof(bool));
 
@@ -386,6 +388,28 @@ namespace Flow_Finder
                 Work = (worker, args) =>
                 {
                     LogInfo("Starting retrieval of cloud flows and solutions");
+
+                    var environmentId = ConnectionDetail.EnvironmentId?.ToString() ?? string.Empty;
+                    Guid defaultSolutionId = Guid.Empty;
+                    try
+                    {
+                        var defaultSolQuery = new QueryExpression("solution")
+                        {
+                            ColumnSet = new ColumnSet("solutionid"),
+                            Criteria = new FilterExpression()
+                        };
+                        defaultSolQuery.Criteria.AddCondition("uniquename", ConditionOperator.Equal, "Default");
+                        var defaultSolResult = Service.RetrieveMultiple(defaultSolQuery);
+                        if (defaultSolResult.Entities.Any())
+                        {
+                            defaultSolutionId = defaultSolResult.Entities.First().Id;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        LogWarning("Failed to retrieve default solution ID: " + ex.Message);
+                    }
+
                     var qe = new QueryExpression("workflow") { ColumnSet = new ColumnSet("workflowid", "name", "ownerid", "type", "category", "description", "createdby", "statecode"), Criteria = new FilterExpression() };
                     qe.Criteria.AddCondition("type", ConditionOperator.Equal, 1);
                     qe.Criteria.AddCondition("category", ConditionOperator.Equal, 6);
@@ -457,15 +481,23 @@ namespace Flow_Finder
                     foreach (var f in flows.Entities)
                     {
                         var stateCode = f.Contains("statecode") ? f.GetAttributeValue<OptionSetValue>("statecode").Value : -1;
+                        var flowId = f.Id;
+                        var solutionIdForLink = flowSolutionIds.ContainsKey(flowId) && flowSolutionIds[flowId].Any()
+                            ? flowSolutionIds[flowId].First()
+                            : defaultSolutionId;
+
                         var fi = new FlowInfo
                         {
-                            Id = f.Id,
+                            Id = flowId,
                             Name = GetStringSafe(f, "name"),
                             Owner = GetEntityReferenceName(f, "ownerid"),
                             OwnerId = GetGuidFromAttribute(f, "ownerid"),
                             Description = GetStringSafe(f, "description"),
                             CreatedBy = GetEntityReferenceName(f, "createdby"),
-                            Status = MapStateCodeToStatus(stateCode)
+                            Status = MapStateCodeToStatus(stateCode),
+                            LinkToFlow = solutionIdForLink != Guid.Empty && !string.IsNullOrEmpty(environmentId)
+                                ? $"https://make.powerautomate.com/environments/{environmentId}/solutions/{solutionIdForLink}/flows/{flowId}?v3=true"
+                                : string.Empty
                         };
 
                         if (flowSolutionNames.ContainsKey(f.Id)) { fi.InSolution = true; fi.Solutions = string.Join(", ", flowSolutionNames[f.Id].Distinct()); }
@@ -622,7 +654,6 @@ namespace Flow_Finder
                     {
                         var row = flowsTable.NewRow();
                         row["Name"] = f.Name ?? string.Empty;
-                        row["Status"] = f.Status ?? string.Empty;
                         row["Description"] = f.Description ?? string.Empty;
                         row["Solutions"] = f.Solutions ?? string.Empty;
                         row["Primary Owner"] = f.Owner ?? string.Empty;
@@ -630,6 +661,8 @@ namespace Flow_Finder
                         row["Triggering Source"] = f.TriggerSource ?? string.Empty;
                         row["Triggering Table"] = f.TriggerEntity ?? string.Empty;
                         row["Other Data Sources"] = f.OtherDataSources ?? string.Empty;
+                        row["Link to Flow"] = f.LinkToFlow ?? string.Empty;
+                        row["Status"] = f.Status ?? string.Empty;
                         row["IsInManagedSolution"] = f.IsInManagedSolution;
                         flowsTable.Rows.Add(row);
                     }
@@ -820,12 +853,12 @@ namespace Flow_Finder
 
                 using (var writer = new StreamWriter(sfd.FileName, false, Encoding.UTF8))
                 {
-                    writer.WriteLine("Name,Status,Description,Solutions,Primary Owner,Co-Owners,Triggering Source,Triggering Table,Other Data Sources");
+                    writer.WriteLine("Name,Description,Solutions,Primary Owner,Co-Owners,Triggering Source,Triggering Table,Other Data Sources,Link to Flow,Status");
                     foreach (DataGridViewRow row in dgvFlows.Rows)
                     {
                         if (row.IsNewRow) continue;
                         var vals = new List<string>();
-                        for (int i = 0; i < 9; i++) vals.Add(EscapeCsv(Convert.ToString(row.Cells[i].Value ?? string.Empty)));
+                        for (int i = 0; i < 10; i++) vals.Add(EscapeCsv(Convert.ToString(row.Cells[i].Value ?? string.Empty)));
                         writer.WriteLine(string.Join(",", vals));
                     }
                 }
@@ -1047,12 +1080,16 @@ namespace Flow_Finder
                         if (row.Tag is Guid id && id == fi.Id)
                         {
                             row.Cells[0].Value = fi.Name;
-                            row.Cells[1].Value = fi.Status ?? "";
-                            row.Cells[2].Value = fi.Description ?? "";
-                            row.Cells[3].Value = fi.Solutions ?? "";
-                            row.Cells[4].Value = fi.Owner ?? "";
-                            row.Cells[5].Value = fi.CoOwners ?? "";
-                            try { row.Cells[5].ToolTipText = fi.CoOwners ?? string.Empty; } catch { }
+                            row.Cells[1].Value = fi.Description ?? "";
+                            row.Cells[2].Value = fi.Solutions ?? "";
+                            row.Cells[3].Value = fi.Owner ?? "";
+                            row.Cells[4].Value = fi.CoOwners ?? "";
+                            row.Cells[5].Value = fi.TriggerSource ?? "";
+                            row.Cells[6].Value = fi.TriggerEntity ?? "";
+                            row.Cells[7].Value = fi.OtherDataSources ?? "";
+                            row.Cells[8].Value = fi.LinkToFlow ?? "";
+                            row.Cells[9].Value = fi.Status ?? "";
+                            try { row.Cells[4].ToolTipText = fi.CoOwners ?? string.Empty; } catch { }
                             try
                             {
                                 bool hasDisabled = false;
@@ -1377,7 +1414,23 @@ namespace Flow_Finder
 
         private void dgvFlows_CellContentClick(object sender, DataGridViewCellEventArgs e)
         {
+            if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
 
+            if (dgvFlows.Columns[e.ColumnIndex].Name == "Link to Flow")
+            {
+                var url = dgvFlows.Rows[e.RowIndex].Cells[e.ColumnIndex].Value as string;
+                if (!string.IsNullOrEmpty(url) && Uri.IsWellFormedUriString(url, UriKind.Absolute))
+                {
+                    try
+                    {
+                        System.Diagnostics.Process.Start(url);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show("Failed to open link: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+            }
         }
     }
 }
