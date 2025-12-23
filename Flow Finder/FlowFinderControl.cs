@@ -117,7 +117,7 @@ namespace Flow_Finder
             flowsTable.Columns.Add("Primary Owner");
             flowsTable.Columns.Add("Co-Owners");
             flowsTable.Columns.Add("Triggering Source");
-            flowsTable.Columns.Add("Triggering Table");
+            flowsTable.Columns.Add("Triggering Table"); // Updated from "Triggering Entity"
             flowsTable.Columns.Add("Other Data Sources");
             flowsTable.Columns.Add("Link to Flow");
             flowsTable.Columns.Add("Status");
@@ -654,6 +654,8 @@ namespace Flow_Finder
                     {
                         var row = flowsTable.NewRow();
                         row["Name"] = f.Name ?? string.Empty;
+                        row["Status"] = f.Status ?? string.Empty;
+                        row["Link to Flow"] = f.LinkToFlow ?? string.Empty;
                         row["Description"] = f.Description ?? string.Empty;
                         row["Solutions"] = f.Solutions ?? string.Empty;
                         row["Primary Owner"] = f.Owner ?? string.Empty;
@@ -661,8 +663,6 @@ namespace Flow_Finder
                         row["Triggering Source"] = f.TriggerSource ?? string.Empty;
                         row["Triggering Table"] = f.TriggerEntity ?? string.Empty;
                         row["Other Data Sources"] = f.OtherDataSources ?? string.Empty;
-                        row["Link to Flow"] = f.LinkToFlow ?? string.Empty;
-                        row["Status"] = f.Status ?? string.Empty;
                         row["IsInManagedSolution"] = f.IsInManagedSolution;
                         flowsTable.Rows.Add(row);
                     }
@@ -999,6 +999,49 @@ namespace Flow_Finder
                         fi.Id = wf.Id; fi.Name = GetStringSafe(wf, "name"); fi.Description = GetStringSafe(wf, "description"); fi.Owner = GetEntityReferenceName(wf, "ownerid"); fi.OwnerId = GetGuidFromAttribute(wf, "ownerid"); fi.CreatedBy = GetEntityReferenceName(wf, "createdby");
                         fi.Status = MapStateCodeToStatus(stateCode);
 
+                        // --- Start of fix: Fetch solution info for the single flow ---
+                        var environmentId = ConnectionDetail.EnvironmentId?.ToString() ?? string.Empty;
+                        Guid defaultSolutionId = Guid.Empty;
+                        try
+                        {
+                            var defaultSolQuery = new QueryExpression("solution") { ColumnSet = new ColumnSet("solutionid"), Criteria = new FilterExpression() };
+                            defaultSolQuery.Criteria.AddCondition("uniquename", ConditionOperator.Equal, "Default");
+                            var defaultSolResult = Service.RetrieveMultiple(defaultSolQuery);
+                            if (defaultSolResult.Entities.Any()) defaultSolutionId = defaultSolResult.Entities.First().Id;
+                        }
+                        catch (Exception ex) { LogWarning("Failed to retrieve default solution ID: " + ex.Message); }
+
+                        var scQ = new QueryExpression("solutioncomponent") { ColumnSet = new ColumnSet("solutionid"), Criteria = new FilterExpression() };
+                        scQ.Criteria.AddCondition("componenttype", ConditionOperator.Equal, 29);
+                        scQ.Criteria.AddCondition("objectid", ConditionOperator.Equal, flowId);
+                        var solutionComponents = Service.RetrieveMultiple(scQ);
+
+                        var solutionIds = solutionComponents.Entities.Select(sc => GetGuidFromAttribute(sc, "solutionid")).Where(g => g != Guid.Empty).Distinct().ToList();
+                        var solutionNames = new Dictionary<Guid, string>();
+                        if (solutionIds.Any())
+                        {
+                            var solFetch = new QueryExpression("solution") { ColumnSet = new ColumnSet("solutionid", "friendlyname", "uniquename") };
+                            solFetch.Criteria.AddCondition("solutionid", ConditionOperator.In, solutionIds.Select(g => (object)g).ToArray());
+                            var sols = Service.RetrieveMultiple(solFetch);
+                            foreach (var s in sols.Entities)
+                            {
+                                var friendly = GetStringSafe(s, "friendlyname") ?? GetStringSafe(s, "uniquename");
+                                var uniq = GetStringSafe(s, "uniquename") ?? string.Empty;
+                                if (!string.IsNullOrEmpty(uniq) && uniq.Equals("default", StringComparison.OrdinalIgnoreCase)) continue;
+                                if (!string.IsNullOrEmpty(friendly) && (friendly.IndexOf("default solution", StringComparison.OrdinalIgnoreCase) >= 0 || friendly.IndexOf("active solution", StringComparison.OrdinalIgnoreCase) >= 0)) continue;
+                                solutionNames[s.Id] = friendly;
+                            }
+                        }
+
+                        if (solutionNames.Any()) fi.Solutions = string.Join(", ", solutionNames.Values.Distinct());
+                        else fi.Solutions = null;
+
+                        var solutionIdForLink = solutionIds.Any() ? solutionIds.First() : defaultSolutionId;
+                        fi.LinkToFlow = solutionIdForLink != Guid.Empty && !string.IsNullOrEmpty(environmentId)
+                            ? $"https://make.powerautomate.com/environments/{environmentId}/solutions/{solutionIdForLink}/flows/{flowId}?v3=true"
+                            : string.Empty;
+                        // --- End of fix ---
+
                         try
                         {
                             var req = new RetrieveSharedPrincipalsAndAccessRequest { Target = new EntityReference("workflow", flowId) };
@@ -1079,17 +1122,14 @@ namespace Flow_Finder
                     {
                         if (row.Tag is Guid id && id == fi.Id)
                         {
-                            row.Cells[0].Value = fi.Name;
-                            row.Cells[1].Value = fi.Description ?? "";
-                            row.Cells[2].Value = fi.Solutions ?? "";
-                            row.Cells[3].Value = fi.Owner ?? "";
-                            row.Cells[4].Value = fi.CoOwners ?? "";
-                            row.Cells[5].Value = fi.TriggerSource ?? "";
-                            row.Cells[6].Value = fi.TriggerEntity ?? "";
-                            row.Cells[7].Value = fi.OtherDataSources ?? "";
-                            row.Cells[8].Value = fi.LinkToFlow ?? "";
-                            row.Cells[9].Value = fi.Status ?? "";
-                            try { row.Cells[4].ToolTipText = fi.CoOwners ?? string.Empty; } catch { }
+                            row.Cells["Name"].Value = fi.Name;
+                            row.Cells["Status"].Value = fi.Status ?? "";
+                            row.Cells["Link to Flow"].Value = fi.LinkToFlow ?? "";
+                            row.Cells["Description"].Value = fi.Description ?? "";
+                            row.Cells["Solutions"].Value = fi.Solutions ?? "";
+                            row.Cells["Primary Owner"].Value = fi.Owner ?? "";
+                            row.Cells["Co-Owners"].Value = fi.CoOwners ?? "";
+                            try { row.Cells["Co-Owners"].ToolTipText = fi.CoOwners ?? string.Empty; } catch { }
                             try
                             {
                                 bool hasDisabled = false;
