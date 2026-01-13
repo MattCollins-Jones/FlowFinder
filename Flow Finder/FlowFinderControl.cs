@@ -316,6 +316,84 @@ namespace Flow_Finder
 
             var dv = flowsTable.DefaultView;
             dv.RowFilter = filters.Any() ? string.Join(" AND ", filters) : string.Empty;
+            // Reapply conditional formatting after filtering
+            try { ApplyConditionalFormattingToFlowsGrid(); } catch { }
+        }
+
+        // Reapply conditional formatting to rows (disabled owner/co-owner highlighting)
+        private void ApplyConditionalFormattingToFlowsGrid()
+        {
+            if (dgvFlows == null || dgvFlows.Rows.Count == 0 || lastResults == null || lastResults.Count == 0) return;
+            for (int i = 0; i < dgvFlows.Rows.Count && i < lastResults.Count; i++)
+            {
+                try { dgvFlows.Rows[i].Tag = lastResults[i].Id; } catch { }
+                try
+                {
+                    var fi = lastResults[i];
+                    // ensure primary owner disabled state is detected even if earlier lookup missed it
+                    try
+                    {
+                        if (fi.OwnerId != Guid.Empty)
+                        {
+                            try
+                            {
+                                if (IsUserDisabled(fi.OwnerId, out var resolvedName))
+                                {
+                                    if (!string.IsNullOrEmpty(resolvedName)) fi.Owner = resolvedName + " (disabled)";
+                                    else fi.Owner = (fi.Owner ?? string.Empty) + " (disabled)";
+                                    // update the cell immediately so display shows disabled marker
+                                    try { dgvFlows.Rows[i].Cells[3].Value = fi.Owner; } catch { }
+                                }
+                            }
+                            catch { }
+                        }
+                    }
+                    catch { }
+
+                    bool hasDisabled = false;
+                    try
+                    {
+                        if (!string.IsNullOrEmpty(fi.Owner) && fi.Owner.IndexOf("(disabled)", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            var ownerBase = RemoveDisabledMarker(fi.Owner);
+                            if (!DisabledUserExceptions.Contains(ownerBase)) hasDisabled = true;
+                        }
+                        if (!hasDisabled && !string.IsNullOrEmpty(fi.CoOwners) && fi.CoOwners.IndexOf("(disabled)", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            try
+                            {
+                                var parts = fi.CoOwners.Split(',');
+                                foreach (var p in parts)
+                                {
+                                    if (p.IndexOf("(disabled)", StringComparison.OrdinalIgnoreCase) >= 0)
+                                    {
+                                        var baseName = RemoveDisabledMarker(p);
+                                        if (!DisabledUserExceptions.Contains(baseName)) { hasDisabled = true; break; }
+                                    }
+                                }
+                            }
+                            catch { }
+                        }
+                    }
+                    catch { }
+
+                    if (hasDisabled)
+                    {
+                        dgvFlows.Rows[i].DefaultCellStyle.BackColor = Color.LightYellow;
+                        dgvFlows.Rows[i].DefaultCellStyle.SelectionBackColor = Color.Gold;
+                        dgvFlows.Rows[i].DefaultCellStyle.ForeColor = Color.DarkRed;
+                        try { dgvFlows.Rows[i].DefaultCellStyle.Font = new Font(dgvFlows.Font, FontStyle.Bold); } catch { }
+                    }
+                    else
+                    {
+                        dgvFlows.Rows[i].DefaultCellStyle.BackColor = Color.Empty;
+                        dgvFlows.Rows[i].DefaultCellStyle.SelectionBackColor = Color.Empty;
+                        dgvFlows.Rows[i].DefaultCellStyle.ForeColor = Color.Empty;
+                        try { dgvFlows.Rows[i].DefaultCellStyle.Font = dgvFlows.Font; } catch { }
+                    }
+                }
+                catch { }
+            }
         }
 
         private void chkHideManaged_Click(object sender, EventArgs e)
@@ -672,78 +750,7 @@ namespace Flow_Finder
                     // apply current filters
                     try { ApplyFilters(); } catch { }
 
-                    for (int i = 0; i < dgvFlows.Rows.Count && i < lastResults.Count; i++)
-                    {
-                        try { dgvFlows.Rows[i].Tag = lastResults[i].Id; } catch { }
-                        try
-                        {
-                            var fi = lastResults[i];
-                            // ensure primary owner disabled state is detected even if earlier lookup missed it
-                            try
-                            {
-                                if (fi.OwnerId != Guid.Empty)
-                                {
-                                    try
-                                    {
-                                        if (IsUserDisabled(fi.OwnerId, out var resolvedName))
-                                        {
-                                            if (!string.IsNullOrEmpty(resolvedName)) fi.Owner = resolvedName + " (disabled)";
-                                            else fi.Owner = (fi.Owner ?? string.Empty) + " (disabled)";
-                                            // update the cell immediately so display shows disabled marker
-                                            try { dgvFlows.Rows[i].Cells[3].Value = fi.Owner; } catch { }
-                                        }
-                                    }
-                                    catch { }
-                                }
-                            }
-                            catch { }
-                            
-                             // fallback: detect disabled users by checking the display strings we annotated earlier
-                             bool hasDisabled = false;
-                             try
-                             {
-                                 // detect disabled markers in display strings but ignore any entries that are in the exception list
-                                 if (!string.IsNullOrEmpty(fi.Owner) && fi.Owner.IndexOf("(disabled)", StringComparison.OrdinalIgnoreCase) >= 0)
-                                 {
-                                     var ownerBase = RemoveDisabledMarker(fi.Owner);
-                                     if (!DisabledUserExceptions.Contains(ownerBase)) hasDisabled = true;
-                                 }
-                                 if (!hasDisabled && !string.IsNullOrEmpty(fi.CoOwners) && fi.CoOwners.IndexOf("(disabled)", StringComparison.OrdinalIgnoreCase) >= 0)
-                                 {
-                                     try
-                                     {
-                                         var parts = fi.CoOwners.Split(',');
-                                         foreach (var p in parts)
-                                         {
-                                             if (p.IndexOf("(disabled)", StringComparison.OrdinalIgnoreCase) >= 0)
-                                             {
-                                                 var baseName = RemoveDisabledMarker(p);
-                                                 if (!DisabledUserExceptions.Contains(baseName)) { hasDisabled = true; break; }
-                                             }
-                                         }
-                                     }
-                                     catch { }
-                                 }
-                            }
-                            catch { }
-                            if (hasDisabled)
-                            {
-                                dgvFlows.Rows[i].DefaultCellStyle.BackColor = Color.LightYellow;
-                                dgvFlows.Rows[i].DefaultCellStyle.SelectionBackColor = Color.Gold;
-                                dgvFlows.Rows[i].DefaultCellStyle.ForeColor = Color.DarkRed;
-                                try { dgvFlows.Rows[i].DefaultCellStyle.Font = new Font(dgvFlows.Font, FontStyle.Bold); } catch { }
-                            }
-                            else
-                            {
-                                // explicitly clear any prior custom styling
-                                dgvFlows.Rows[i].DefaultCellStyle.BackColor = Color.Empty;
-                                dgvFlows.Rows[i].DefaultCellStyle.SelectionBackColor = Color.Empty;
-                                dgvFlows.Rows[i].DefaultCellStyle.ForeColor = Color.Empty;
-                                try { dgvFlows.Rows[i].DefaultCellStyle.Font = dgvFlows.Font; } catch { }
-                            }
-                        }
-                        catch { }
-                    }
+                    ApplyConditionalFormattingToFlowsGrid();
 
                     try { cmbSolutions.ComboBox.DataSource = null; } catch { }
                     cmbSolutions.ComboBox.Items.Clear(); cmbSolutions.ComboBox.Items.Add("All solutions");

@@ -47,6 +47,12 @@ Contributing
 
 - Issues and pull requests are welcome. Open them on the project repository: https://github.com/MattCollins-Jones/FlowFinder
 
+ Changelog (v1.2026.1.20)
+- **New**: Added clicable link to open a flow from "Link to flow" column 
+- **Fix**: Issue where conditional formatting disappeared after filtering the grid.
+- 
+
+
 Changelog (v1.2025.12.22)
 
 - **New**: "Triggering Entity" column renamed to "Triggering Table". - Thanks Cooky!
