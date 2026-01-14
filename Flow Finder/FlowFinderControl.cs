@@ -779,9 +779,9 @@ namespace Flow_Finder
             {
                 if (toolStripMenu != null)
                 {
-                    AddRuntimeButtonIfMissing("tsbManageCoOwners", "Manage Co-Owners", tsbManageCoOwners_Click);
-                    AddRuntimeButtonIfMissing("tsbManageSolutions", "Manage Solutions", tsbManageSolutions_Click);
-                    AddRuntimeButtonIfMissing("tsbSettingsRuntime", "Settings", tsbSettings_Click);
+                    AddRuntimeButtonIfMissing("tsbManageCoOwners", "Manage Co-Owners", global::FlowFinder.Properties.Resources.UsersMan, tsbManageCoOwners_Click);
+                    AddRuntimeButtonIfMissing("tsbManageSolutions", "Manage Solutions", global::FlowFinder.Properties.Resources.SolIcon, tsbManageSolutions_Click);
+                    AddRuntimeButtonIfMissing("tsbSettingsRuntime", "Settings", global::FlowFinder.Properties.Resources.Settings, tsbSettings_Click);
                     // Feedback is provided via the host Feedback menu (IGitHubPlugin). Do not add a runtime toolbar button here.
                  }
              }
@@ -819,6 +819,22 @@ namespace Flow_Finder
                 }));
             }
             catch { }
+        }
+
+        private void AddRuntimeButtonIfMissing(string name, string text, Image image, EventHandler handler)
+        {
+            bool has = false;
+            foreach (ToolStripItem it in toolStripMenu.Items)
+            {
+                if (string.Equals(it.Name, name, StringComparison.OrdinalIgnoreCase)) { has = true; break; }
+            }
+            if (!has)
+            {
+                var btn = new ToolStripButton() { DisplayStyle = ToolStripItemDisplayStyle.ImageAndText, Name = name, Text = text, Image = image };
+                btn.Click += handler;
+                toolStripMenu.Items.Add(new ToolStripSeparator());
+                toolStripMenu.Items.Add(btn);
+            }
         }
 
         private void AddRuntimeButtonIfMissing(string name, string text, EventHandler handler)
@@ -1027,16 +1043,12 @@ namespace Flow_Finder
                         var solutionNames = new Dictionary<Guid, string>();
                         if (solutionIds.Any())
                         {
-                            var solFetch = new QueryExpression("solution") { ColumnSet = new ColumnSet("solutionid", "friendlyname", "uniquename") };
-                            solFetch.Criteria.AddCondition("solutionid", ConditionOperator.In, solutionIds.Select(g => (object)g).ToArray());
-                            var sols = Service.RetrieveMultiple(solFetch);
+                            var solQ = new QueryExpression("solution") { ColumnSet = new ColumnSet("solutionid", "friendlyname", "uniquename", "ismanaged") };
+                            solQ.Criteria.AddCondition("solutionid", ConditionOperator.In, solutionIds.Cast<object>().ToArray());
+                            var sols = Service.RetrieveMultiple(solQ);
                             foreach (var s in sols.Entities)
                             {
-                                var friendly = GetStringSafe(s, "friendlyname") ?? GetStringSafe(s, "uniquename");
-                                var uniq = GetStringSafe(s, "uniquename") ?? string.Empty;
-                                if (!string.IsNullOrEmpty(uniq) && uniq.Equals("default", StringComparison.OrdinalIgnoreCase)) continue;
-                                if (!string.IsNullOrEmpty(friendly) && (friendly.IndexOf("default solution", StringComparison.OrdinalIgnoreCase) >= 0 || friendly.IndexOf("active solution", StringComparison.OrdinalIgnoreCase) >= 0)) continue;
-                                solutionNames[s.Id] = friendly;
+                                var id = s.Id; var friendly = s.GetAttributeValue<string>("friendlyname") ?? s.GetAttributeValue<string>("uniquename"); var uniq = s.GetAttributeValue<string>("uniquename") ?? string.Empty; if (!string.IsNullOrEmpty(uniq) && uniq.Equals("default", StringComparison.OrdinalIgnoreCase)) continue; if (!string.IsNullOrEmpty(friendly) && (friendly.IndexOf("default solution", StringComparison.OrdinalIgnoreCase) >= 0 || friendly.IndexOf("active solution", StringComparison.OrdinalIgnoreCase) >= 0)) continue; solutionNames[s.Id] = friendly;
                             }
                         }
 
