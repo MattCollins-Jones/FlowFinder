@@ -48,7 +48,7 @@ Contributing
 - Issues and pull requests are welcome. Open them on the project repository: https://github.com/MattCollins-Jones/FlowFinder
 
  Changelog (v1.2026.1.15)
-- **New**: Added clicable link to open a flow from "Link to flow" column 
+- **New**: Added clickable link to open a flow from "Link to flow" column 
 - **New**: ICON UPDATE - Thanks to Cooky for the new icon design! Icons from Lizel Arina & kliwir art at flaticon.com
 - **New**: Added current status of flow, active, inactive, suspended. Thanks to Amine Debba for this suggestion.
 - **Fix**: Issue where conditional formatting disappeared after filtering the grid.
