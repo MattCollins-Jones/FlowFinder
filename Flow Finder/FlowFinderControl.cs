@@ -15,7 +15,7 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using XrmToolBox.Extensibility;
 using XrmToolBox.Extensibility.Interfaces;
-using System.Runtime.ExceptionServices;
+
 
 namespace Flow_Finder
 {
@@ -68,7 +68,6 @@ namespace Flow_Finder
 
         public FlowFinderControl()
         {
-            AppDomain.CurrentDomain.FirstChanceException += CurrentDomain_FirstChanceException;
             InitializeComponent();
             InitializeFlowsTable();
             dgvFlows.DataBindingComplete += DgvFlows_DataBindingComplete;
@@ -92,19 +91,6 @@ namespace Flow_Finder
                 {
                     row.Tag = flowInfo.Id;
                 }
-            }
-        }
-
-        private void CurrentDomain_FirstChanceException(object sender, FirstChanceExceptionEventArgs e)
-        {
-            try
-            {
-                var log = Path.Combine(Path.GetTempPath(), "FlowFinder_FirstChance.log");
-                File.AppendAllText(log, DateTime.Now.ToString("o") + " - " + e.Exception.ToString() + Environment.NewLine + Environment.NewLine);
-            }
-            catch (Exception ex)
-            {
-                LogWarning("Failed to write to first-chance log: " + ex.Message);
             }
         }
 
@@ -488,21 +474,21 @@ namespace Flow_Finder
                         LogWarning("Failed to retrieve default solution ID: " + ex.Message);
                     }
 
-                    var qe = new QueryExpression("workflow") { ColumnSet = new ColumnSet("workflowid", "name", "ownerid", "type", "category", "description", "createdby", "statecode"), Criteria = new FilterExpression() };
+                    var qe = new QueryExpression("workflow") { ColumnSet = new ColumnSet("workflowid", "name", "ownerid", "type", "category", "description", "createdby", "clientdata", "statecode"), Criteria = new FilterExpression() };
                     qe.Criteria.AddCondition("type", ConditionOperator.Equal, 1);
                     qe.Criteria.AddCondition("category", ConditionOperator.Equal, 6);
                     var flows = Service.RetrieveMultiple(qe);
 
                     if (flows == null || flows.Entities.Count == 0)
                     {
-                        var qe2 = new QueryExpression("workflow") { ColumnSet = new ColumnSet("workflowid", "name", "ownerid", "type", "category", "description", "createdby", "statecode"), Criteria = new FilterExpression() };
+                        var qe2 = new QueryExpression("workflow") { ColumnSet = new ColumnSet("workflowid", "name", "ownerid", "type", "category", "description", "createdby", "clientdata", "statecode"), Criteria = new FilterExpression() };
                         qe2.Criteria.AddCondition("type", ConditionOperator.Equal, 1);
                         qe2.Criteria.AddCondition("category", ConditionOperator.In, new object[] { 5, 6, 7 });
                         flows = Service.RetrieveMultiple(qe2);
                     }
                     if (flows == null || flows.Entities.Count == 0)
                     {
-                        var qe3 = new QueryExpression("workflow") { ColumnSet = new ColumnSet("workflowid", "name", "ownerid", "type", "category", "description", "createdby", "statecode") };
+                        var qe3 = new QueryExpression("workflow") { ColumnSet = new ColumnSet("workflowid", "name", "ownerid", "type", "category", "description", "createdby", "clientdata", "statecode") };
                         qe3.Criteria.AddCondition("type", ConditionOperator.Equal, 1);
                         flows = Service.RetrieveMultiple(qe3);
                     }
@@ -514,12 +500,13 @@ namespace Flow_Finder
                     var solutionIds = solutionComponents.Entities.Select(sc => GetGuidFromAttribute(sc, "solutionid")).Where(g => g != Guid.Empty).Distinct().ToList();
                     var solutionNames = new Dictionary<Guid, string>();
                     var solutionIsManaged = new Dictionary<Guid, bool>();
+                    // built locally on the background thread and assigned to the field only in PostWorkCallBack (UI thread) — no data race
+                    var newManagedStatus = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
                     if (solutionIds.Any())
                     {
                         var solFetch = new QueryExpression("solution") { ColumnSet = new ColumnSet("solutionid", "friendlyname", "uniquename", "ismanaged") };
                         solFetch.Criteria.AddCondition("solutionid", ConditionOperator.In, solutionIds.Select(g => (object)g).ToArray());
                         var sols = Service.RetrieveMultiple(solFetch);
-                        _solutionManagedStatus.Clear();
                         foreach (var s in sols.Entities)
                         {
                             var friendly = GetStringSafe(s, "friendlyname") ?? GetStringSafe(s, "uniquename");
@@ -530,9 +517,9 @@ namespace Flow_Finder
                             bool isManaged = false;
                             try { isManaged = s.GetAttributeValue<bool?>("ismanaged") ?? false; } catch { }
                             solutionIsManaged[s.Id] = isManaged;
-                            if (!string.IsNullOrEmpty(friendly) && !_solutionManagedStatus.ContainsKey(friendly))
+                            if (!string.IsNullOrEmpty(friendly) && !newManagedStatus.ContainsKey(friendly))
                             {
-                                _solutionManagedStatus.Add(friendly, isManaged);
+                                newManagedStatus.Add(friendly, isManaged);
                             }
                         }
                     }
@@ -606,6 +593,17 @@ namespace Flow_Finder
 
                         // track owner ids for later disabled check
                         if (fi.OwnerId != Guid.Empty) ownerIds.Add(fi.OwnerId);
+
+                        // parse clientdata fetched in the initial query — avoids a separate Retrieve per flow
+                        try
+                        {
+                            var clientJson = GetStringSafe(f, "clientdata");
+                            if (!string.IsNullOrEmpty(clientJson)) ParseClientData(clientJson, fi);
+                        }
+                        catch (Exception ex)
+                        {
+                            LogWarning($"Failed to parse clientdata for flow {fi.Id}: {ex.Message}");
+                        }
 
                         results.Add(fi);
                     }
@@ -694,24 +692,7 @@ namespace Flow_Finder
                         catch { }
                     }
 
-                    foreach (var fi in results)
-                    {
-                        try
-                        {
-                            var wf = Service.Retrieve("workflow", fi.Id, new ColumnSet("clientdata"));
-                            if (wf != null && wf.Attributes.ContainsKey("clientdata"))
-                            {
-                                var clientJson = GetStringSafe(wf, "clientdata");
-                                ParseClientData(clientJson, fi);
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            LogWarning($"Failed to retrieve clientdata for flow {fi.Id}: {ex.Message}");
-                        }
-                    }
-
-                    args.Result = new { Results = results, Solutions = allSolutionNames, DisabledPrincipalIds = principalDisabled.ToArray() };
+                    args.Result = new { Results = results, Solutions = allSolutionNames, DisabledPrincipalIds = principalDisabled.ToArray(), ManagedStatus = newManagedStatus };
                 },
                 PostWorkCallBack = (args) =>
                 {
@@ -725,6 +706,7 @@ namespace Flow_Finder
                     lastResults = ((List<FlowInfo>)r.Results).OrderBy(f => f.Name).ToList();
                     var solutionNames = (List<string>)r.Solutions;
                     var disabledIds = (Guid[])r.DisabledPrincipalIds;
+                    _solutionManagedStatus = (Dictionary<string, bool>)r.ManagedStatus;
 
                     try { dgvFlows.DataSource = null; } catch { }
                     flowsTable.Clear();
