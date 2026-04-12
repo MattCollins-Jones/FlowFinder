@@ -306,8 +306,8 @@ namespace Flow_Finder
             try { ApplyConditionalFormattingToFlowsGrid(); } catch { }
         }
 
-        // Reapply conditional formatting to rows (disabled owner/co-owner highlighting).
-        // Owner/co-owner "(disabled)" markers are resolved on the background thread — no network calls here.
+        // Reapply conditional formatting to rows (disabled owner/Co-Owner highlighting).
+        // Owner/Co-Owner "(disabled)" markers are resolved on the background thread — no network calls here.
         private void ApplyConditionalFormattingToFlowsGrid()
         {
             if (dgvFlows == null || dgvFlows.Rows.Count == 0 || lastResults == null || lastResults.Count == 0) return;
@@ -1089,7 +1089,7 @@ namespace Flow_Finder
                                 }
                                 catch (Exception ex) { LogWarning("Failed to resolve team names: " + ex.Message); }
 
-                                // build co-owner display names excluding primary owner
+                                // build Co-Owner display names excluding primary owner
                                 if (principalIds != null && principalIds.Any())
                                 {
                                     var coIds = principalIds.Where(id => id != fi.OwnerId).Distinct().ToList();

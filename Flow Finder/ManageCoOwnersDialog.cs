@@ -24,11 +24,11 @@ namespace Flow_Finder
 
         private void Initialize()
         {
-            this.Text = "Manage Co-owners"; this.Width = 600; this.Height = 400; this.StartPosition = FormStartPosition.CenterParent;
+            this.Text = "Manage Co-Owners"; this.Width = 600; this.Height = 400; this.StartPosition = FormStartPosition.CenterParent;
             lbCoOwners = new ListBox() { Left = 10, Top = 10, Width = 350, Height = 300 }; this.Controls.Add(lbCoOwners);
             cbUsers = new ComboBox() { Left = 370, Top = 10, Width = 200, DropDownStyle = ComboBoxStyle.DropDown, AutoCompleteMode = AutoCompleteMode.SuggestAppend, AutoCompleteSource = AutoCompleteSource.ListItems }; this.Controls.Add(cbUsers);
-            btnAdd = new Button() { Left = 370, Top = 50, Width = 200, Text = "Add as Co-owner" }; btnAdd.Click += BtnAdd_Click; this.Controls.Add(btnAdd);
-            btnRemove = new Button() { Left = 370, Top = 90, Width = 200, Text = "Remove Selected Co-owner" }; btnRemove.Click += BtnRemove_Click; this.Controls.Add(btnRemove);
+            btnAdd = new Button() { Left = 370, Top = 50, Width = 200, Text = "Add as Co-Owner" }; btnAdd.Click += BtnAdd_Click; this.Controls.Add(btnAdd);
+            btnRemove = new Button() { Left = 370, Top = 90, Width = 200, Text = "Remove Selected Co-Owner" }; btnRemove.Click += BtnRemove_Click; this.Controls.Add(btnRemove);
             btnClose = new Button() { Left = 370, Top = 300, Width = 200, Text = "Close" }; btnClose.Click += (s, e) => this.Close(); this.Controls.Add(btnClose);
         }
 
@@ -43,7 +43,7 @@ namespace Flow_Finder
                 var resp = (RetrieveSharedPrincipalsAndAccessResponse)_service.Execute(req);
                 if (resp?.PrincipalAccesses != null) foreach (var pa in resp.PrincipalAccesses) if (pa.Principal is EntityReference er) principalIds.Add(er.Id);
             }
-            catch (Exception ex) { _logWarn("Failed to load co-owners: " + ex.Message); MessageBox.Show("Failed to load co-owners: " + ex.Message); }
+            catch (Exception ex) { _logWarn("Failed to load Co-Owners: " + ex.Message); MessageBox.Show("Failed to load Co-Owners: " + ex.Message); }
 
             var names = new Dictionary<Guid, string>();
             var disabledSetLocal = new HashSet<Guid>();
@@ -65,7 +65,7 @@ namespace Flow_Finder
                         if (isDisabled) disabledSetLocal.Add(u.Id);
                     }
                 }
-                catch (Exception ex) { _logWarn("Failed to resolve co-owner user names: " + ex.Message); }
+                catch (Exception ex) { _logWarn("Failed to resolve Co-Owner user names: " + ex.Message); }
                 try { var teamQ = new QueryExpression("team") { ColumnSet = new ColumnSet("teamid", "name") }; teamQ.Criteria.AddCondition("teamid", ConditionOperator.In, principalIds.Cast<object>().ToArray()); var teams = _service.RetrieveMultiple(teamQ); foreach (var t in teams.Entities) names[t.Id] = t.GetAttributeValue<string>("name"); }
                 catch (Exception ex) { _logWarn("Failed to resolve team names: " + ex.Message); }
             }
@@ -113,7 +113,7 @@ namespace Flow_Finder
         private void BtnAdd_Click(object sender, EventArgs e)
         {
             var sel = cbUsers.SelectedItem as ListItem; if (sel == null) { MessageBox.Show("Select a user to add."); return; }
-            btnAdd.Enabled = false; btnRemove.Enabled = false; cbUsers.Enabled = false; lbCoOwners.Enabled = false; var busy = new BusyForm("Adding co-owner..."); busy.Show(this);
+            btnAdd.Enabled = false; btnRemove.Enabled = false; cbUsers.Enabled = false; lbCoOwners.Enabled = false; var busy = new BusyForm("Adding Co-Owner..."); busy.Show(this);
             var op = Task.Run(() =>
             {
                 try
@@ -127,8 +127,8 @@ namespace Flow_Finder
             {
                 try { busy.Close(); } catch { /* safe cleanup */ }
                 btnAdd.Enabled = true; btnRemove.Enabled = true; cbUsers.Enabled = true; lbCoOwners.Enabled = true;
-                if (t.Result == null) { _logInfo($"Added co-owner {sel.Name}"); MessageBox.Show("Added co-owner."); ChangesMade = true; }
-                else { _logWarn("Failed to add co-owner: " + t.Result.Message); MessageBox.Show("Failed to add co-owner: " + t.Result.Message); }
+                if (t.Result == null) { _logInfo($"Added Co-Owner {sel.Name}"); MessageBox.Show("Added Co-Owner."); ChangesMade = true; }
+                else { _logWarn("Failed to add Co-Owner: " + t.Result.Message); MessageBox.Show("Failed to add Co-Owner: " + t.Result.Message); }
                 LoadData();
             }, TaskScheduler.FromCurrentSynchronizationContext());
             _lastOperation = op;
@@ -136,9 +136,9 @@ namespace Flow_Finder
 
         private void BtnRemove_Click(object sender, EventArgs e)
         {
-            var sel = lbCoOwners.SelectedItem as ListItem; if (sel == null) { MessageBox.Show("Select a co-owner to remove."); return; }
-            var confirm = MessageBox.Show($"Are you sure you want to remove co-owner '{sel.Name}'?", "Confirm remove", MessageBoxButtons.YesNo, MessageBoxIcon.Question); if (confirm != DialogResult.Yes) return;
-            btnAdd.Enabled = false; btnRemove.Enabled = false; cbUsers.Enabled = false; lbCoOwners.Enabled = false; var busy = new BusyForm("Removing co-owner..."); busy.Show(this);
+            var sel = lbCoOwners.SelectedItem as ListItem; if (sel == null) { MessageBox.Show("Select a Co-Owner to remove."); return; }
+            var confirm = MessageBox.Show($"Are you sure you want to remove Co-Owner '{sel.Name}'?", "Confirm remove", MessageBoxButtons.YesNo, MessageBoxIcon.Question); if (confirm != DialogResult.Yes) return;
+            btnAdd.Enabled = false; btnRemove.Enabled = false; cbUsers.Enabled = false; lbCoOwners.Enabled = false; var busy = new BusyForm("Removing Co-Owner..."); busy.Show(this);
             var op = Task.Run(() =>
             {
                 try { var revoke = new RevokeAccessRequest { Target = new EntityReference("workflow", _flowId), Revokee = new EntityReference("systemuser", sel.Id) }; _service.Execute(revoke); return (Exception)null; }
@@ -147,8 +147,8 @@ namespace Flow_Finder
             {
                 try { busy.Close(); } catch { /* safe cleanup */ }
                 btnAdd.Enabled = true; btnRemove.Enabled = true; cbUsers.Enabled = true; lbCoOwners.Enabled = true;
-                if (t.Result == null) { _logInfo($"Removed co-owner {sel.Name}"); MessageBox.Show("Removed co-owner."); ChangesMade = true; }
-                else { _logWarn("Failed to remove co-owner: " + t.Result.Message); MessageBox.Show("Failed to remove co-owner: " + t.Result.Message); }
+                if (t.Result == null) { _logInfo($"Removed Co-Owner {sel.Name}"); MessageBox.Show("Removed Co-Owner."); ChangesMade = true; }
+                else { _logWarn("Failed to remove Co-Owner: " + t.Result.Message); MessageBox.Show("Failed to remove Co-Owner: " + t.Result.Message); }
                 LoadData();
             }, TaskScheduler.FromCurrentSynchronizationContext());
             _lastOperation = op;

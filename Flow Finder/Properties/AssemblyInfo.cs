@@ -6,7 +6,7 @@ using System.Runtime.InteropServices;
 // set of attributes. Change these attribute values to modify the information
 // associated with an assembly.
 [assembly: AssemblyTitle("Flow Finder")]
-[assembly: AssemblyDescription("Find the solutions that contain the flows, updated solutions and co-owners")]
+[assembly: AssemblyDescription("Find the solutions that contain the flows, update solutions and Co-Owners")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("Matt Collins-Jones")]
 [assembly: AssemblyProduct("Flow Finder")]
