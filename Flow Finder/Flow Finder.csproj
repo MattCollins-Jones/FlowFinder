@@ -238,6 +238,7 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="BusyForm.cs" />
     <Compile Include="FlowFinder.cs" />
     <Compile Include="FlowFinderControl.cs">
       <SubType>UserControl</SubType>
@@ -251,6 +252,9 @@
       <DesignTime>True</DesignTime>
       <DependentUpon>Resources.resx</DependentUpon>
     </Compile>
+    <Compile Include="ManageCoOwnersDialog.cs" />
+    <Compile Include="ManageSolutionsDialog.cs" />
+    <Compile Include="SettingsDialog.cs" />
     <Compile Include="Settings.cs" />
   </ItemGroup>
   <ItemGroup>

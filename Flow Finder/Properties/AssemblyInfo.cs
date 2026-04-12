@@ -6,7 +6,7 @@ using System.Runtime.InteropServices;
 // set of attributes. Change these attribute values to modify the information
 // associated with an assembly.
 [assembly: AssemblyTitle("Flow Finder")]
-[assembly: AssemblyDescription("Find the solutions that contain the flows, updated solutions and co-owners")]
+[assembly: AssemblyDescription("Find the solutions that contain the flows, update solutions and Co-Owners")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("Matt Collins-Jones")]
 [assembly: AssemblyProduct("Flow Finder")]
@@ -32,5 +32,5 @@ using System.Runtime.InteropServices;
 // You can specify all the values or you can default the Build and Revision Numbers 
 // by using the '*' as shown below:
 // [assembly: AssemblyVersion("1.0.*")]
-[assembly: AssemblyVersion("1.2026.1.15")]
-[assembly: AssemblyFileVersion("1.2026.1.15")]
+[assembly: AssemblyVersion("1.2026.4.12")]
+[assembly: AssemblyFileVersion("1.2026.4.12")]
