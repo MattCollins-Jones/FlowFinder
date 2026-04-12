@@ -29,6 +29,7 @@ namespace Flow_Finder
         private DataTable flowsTable;
         private List<FlowInfo> lastResults = new List<FlowInfo>();
         private Dictionary<string, bool> _solutionManagedStatus = new Dictionary<string, bool>();
+        private Font _boldFont;
 
         private class FlowInfo
         {
@@ -306,76 +307,60 @@ namespace Flow_Finder
             try { ApplyConditionalFormattingToFlowsGrid(); } catch { }
         }
 
-        // Reapply conditional formatting to rows (disabled owner/co-owner highlighting)
+        // Reapply conditional formatting to rows (disabled owner/co-owner highlighting).
+        // Owner/co-owner "(disabled)" markers are resolved on the background thread — no network calls here.
         private void ApplyConditionalFormattingToFlowsGrid()
         {
             if (dgvFlows == null || dgvFlows.Rows.Count == 0 || lastResults == null || lastResults.Count == 0) return;
+
+            // Cache the bold font for the lifetime of this grid font to avoid a GDI object leak per row.
+            if (_boldFont == null || _boldFont.Size != dgvFlows.Font.Size || _boldFont.FontFamily.Name != dgvFlows.Font.FontFamily.Name)
+            {
+                _boldFont?.Dispose();
+                _boldFont = new Font(dgvFlows.Font, FontStyle.Bold);
+            }
+
             for (int i = 0; i < dgvFlows.Rows.Count && i < lastResults.Count; i++)
             {
                 try { dgvFlows.Rows[i].Tag = lastResults[i].Id; } catch { }
                 try
                 {
                     var fi = lastResults[i];
-                    // ensure primary owner disabled state is detected even if earlier lookup missed it
-                    try
-                    {
-                        if (fi.OwnerId != Guid.Empty)
-                        {
-                            try
-                            {
-                                if (IsUserDisabled(fi.OwnerId, out var resolvedName))
-                                {
-                                    if (!string.IsNullOrEmpty(resolvedName)) fi.Owner = resolvedName + " (disabled)";
-                                    else fi.Owner = (fi.Owner ?? string.Empty) + " (disabled)";
-                                    // update the cell immediately so display shows disabled marker
-                                    try { dgvFlows.Rows[i].Cells[3].Value = fi.Owner; } catch { }
-                                }
-                            }
-                            catch { }
-                        }
-                    }
-                    catch { }
-
                     bool hasDisabled = false;
-                    try
+
+                    if (!string.IsNullOrEmpty(fi.Owner) && fi.Owner.IndexOf("(disabled)", StringComparison.OrdinalIgnoreCase) >= 0)
                     {
-                        if (!string.IsNullOrEmpty(fi.Owner) && fi.Owner.IndexOf("(disabled)", StringComparison.OrdinalIgnoreCase) >= 0)
+                        var ownerBase = RemoveDisabledMarker(fi.Owner);
+                        if (!DisabledUserExceptions.Contains(ownerBase)) hasDisabled = true;
+                    }
+                    if (!hasDisabled && !string.IsNullOrEmpty(fi.CoOwners) && fi.CoOwners.IndexOf("(disabled)", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        try
                         {
-                            var ownerBase = RemoveDisabledMarker(fi.Owner);
-                            if (!DisabledUserExceptions.Contains(ownerBase)) hasDisabled = true;
-                        }
-                        if (!hasDisabled && !string.IsNullOrEmpty(fi.CoOwners) && fi.CoOwners.IndexOf("(disabled)", StringComparison.OrdinalIgnoreCase) >= 0)
-                        {
-                            try
+                            foreach (var p in fi.CoOwners.Split(','))
                             {
-                                var parts = fi.CoOwners.Split(',');
-                                foreach (var p in parts)
+                                if (p.IndexOf("(disabled)", StringComparison.OrdinalIgnoreCase) >= 0)
                                 {
-                                    if (p.IndexOf("(disabled)", StringComparison.OrdinalIgnoreCase) >= 0)
-                                    {
-                                        var baseName = RemoveDisabledMarker(p);
-                                        if (!DisabledUserExceptions.Contains(baseName)) { hasDisabled = true; break; }
-                                    }
+                                    if (!DisabledUserExceptions.Contains(RemoveDisabledMarker(p))) { hasDisabled = true; break; }
                                 }
                             }
-                            catch { }
                         }
+                        catch { }
                     }
-                    catch { }
 
                     if (hasDisabled)
                     {
                         dgvFlows.Rows[i].DefaultCellStyle.BackColor = Color.LightYellow;
                         dgvFlows.Rows[i].DefaultCellStyle.SelectionBackColor = Color.Gold;
                         dgvFlows.Rows[i].DefaultCellStyle.ForeColor = Color.DarkRed;
-                        try { dgvFlows.Rows[i].DefaultCellStyle.Font = new Font(dgvFlows.Font, FontStyle.Bold); } catch { }
+                        dgvFlows.Rows[i].DefaultCellStyle.Font = _boldFont;
                     }
                     else
                     {
                         dgvFlows.Rows[i].DefaultCellStyle.BackColor = Color.Empty;
                         dgvFlows.Rows[i].DefaultCellStyle.SelectionBackColor = Color.Empty;
                         dgvFlows.Rows[i].DefaultCellStyle.ForeColor = Color.Empty;
-                        try { dgvFlows.Rows[i].DefaultCellStyle.Font = dgvFlows.Font; } catch { }
+                        dgvFlows.Rows[i].DefaultCellStyle.Font = dgvFlows.Font;
                     }
                 }
                 catch { }
@@ -710,29 +695,35 @@ namespace Flow_Finder
 
                     try { dgvFlows.DataSource = null; } catch { }
                     flowsTable.Clear();
-                    foreach (var f in lastResults)
+                    dgvFlows.SuspendLayout();
+                    try
                     {
-                        var row = flowsTable.NewRow();
-                        row["Name"] = f.Name ?? string.Empty;
-                        row["Status"] = f.Status ?? string.Empty;
-                        row["Link to Flow"] = f.LinkToFlow ?? string.Empty;
-                        row["Description"] = f.Description ?? string.Empty;
-                        row["Solutions"] = f.Solutions ?? string.Empty;
-                        row["Primary Owner"] = f.Owner ?? string.Empty;
-                        row["Co-Owners"] = f.CoOwners ?? string.Empty;
-                        row["Triggering Source"] = f.TriggerSource ?? string.Empty;
-                        row["Triggering Table"] = f.TriggerEntity ?? string.Empty;
-                        row["Other Data Sources"] = f.OtherDataSources ?? string.Empty;
-                        row["IsInManagedSolution"] = f.IsInManagedSolution;
-                        flowsTable.Rows.Add(row);
+                        foreach (var f in lastResults)
+                        {
+                            var row = flowsTable.NewRow();
+                            row["Name"] = f.Name ?? string.Empty;
+                            row["Status"] = f.Status ?? string.Empty;
+                            row["Link to Flow"] = f.LinkToFlow ?? string.Empty;
+                            row["Description"] = f.Description ?? string.Empty;
+                            row["Solutions"] = f.Solutions ?? string.Empty;
+                            row["Primary Owner"] = f.Owner ?? string.Empty;
+                            row["Co-Owners"] = f.CoOwners ?? string.Empty;
+                            row["Triggering Source"] = f.TriggerSource ?? string.Empty;
+                            row["Triggering Table"] = f.TriggerEntity ?? string.Empty;
+                            row["Other Data Sources"] = f.OtherDataSources ?? string.Empty;
+                            row["IsInManagedSolution"] = f.IsInManagedSolution;
+                            flowsTable.Rows.Add(row);
+                        }
+                        dgvFlows.DataSource = flowsTable;
                     }
-                    dgvFlows.DataSource = flowsTable;
+                    finally
+                    {
+                        dgvFlows.ResumeLayout(false);
+                    }
                     // hide the helper column used for filtering
                     try { if (dgvFlows.Columns.Contains("IsInManagedSolution")) dgvFlows.Columns["IsInManagedSolution"].Visible = false; } catch { }
-                    // apply current filters
+                    // ApplyFilters calls ApplyConditionalFormattingToFlowsGrid — no need to call it again afterwards
                     try { ApplyFilters(); } catch { }
-
-                    ApplyConditionalFormattingToFlowsGrid();
 
                     try { cmbSolutions.ComboBox.DataSource = null; } catch { }
                     cmbSolutions.ComboBox.Items.Clear(); cmbSolutions.ComboBox.Items.Add("All solutions");
