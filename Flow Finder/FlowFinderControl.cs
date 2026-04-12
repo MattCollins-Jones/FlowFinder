@@ -546,21 +546,34 @@ namespace Flow_Finder
                         var flowIds = flows.Entities.Select(f => f.Id).ToList();
                         var poaQ = new QueryExpression("principalobjectaccess")
                         {
-                            ColumnSet = new ColumnSet("objectid", "principalid")
+                            ColumnSet = new ColumnSet("objectid", "principalid", "accessrightsmask")
                         };
                         poaQ.Criteria.AddCondition("objecttypecode", ConditionOperator.Equal, WorkflowEntityTypeCode);
                         poaQ.Criteria.AddCondition("objectid", ConditionOperator.In, flowIds.Cast<object>().ToArray());
-                        var poaResults = Service.RetrieveMultiple(poaQ);
-                        foreach (var poa in poaResults.Entities)
+                        // Only include records with a direct (non-inherited) share — accessrightsmask > 0.
+                        // Records with only team-inherited access have accessrightsmask = 0 and would otherwise
+                        // cause revoked co-owners to reappear on full reload.
+                        poaQ.Criteria.AddCondition("accessrightsmask", ConditionOperator.GreaterThan, 0);
+                        poaQ.PageInfo = new PagingInfo { Count = 5000, PageNumber = 1, ReturnTotalRecordCount = false };
+                        EntityCollection poaPage;
+                        int totalPoa = 0;
+                        do
                         {
-                            var objId = GetGuidFromAttribute(poa, "objectid");
-                            var principalId = GetGuidFromAttribute(poa, "principalid");
-                            if (objId == Guid.Empty || principalId == Guid.Empty) continue;
-                            if (!flowPrincipals.ContainsKey(objId)) flowPrincipals[objId] = new List<Guid>();
-                            flowPrincipals[objId].Add(principalId);
-                        }
+                            poaPage = Service.RetrieveMultiple(poaQ);
+                            totalPoa += poaPage.Entities.Count;
+                            foreach (var poa in poaPage.Entities)
+                            {
+                                var objId = GetGuidFromAttribute(poa, "objectid");
+                                var principalId = GetGuidFromAttribute(poa, "principalid");
+                                if (objId == Guid.Empty || principalId == Guid.Empty) continue;
+                                if (!flowPrincipals.ContainsKey(objId)) flowPrincipals[objId] = new List<Guid>();
+                                flowPrincipals[objId].Add(principalId);
+                            }
+                            poaQ.PageInfo.PageNumber++;
+                            poaQ.PageInfo.PagingCookie = poaPage.PagingCookie;
+                        } while (poaPage.MoreRecords);
                         poaQuerySucceeded = true;
-                        LogInfo($"POA bulk query returned {poaResults.Entities.Count} records for {flowIds.Count} flows.");
+                        LogInfo($"POA bulk query returned {totalPoa} records for {flowIds.Count} flows.");
                     }
                     catch (FaultException<OrganizationServiceFault> fex) when (fex.Detail?.ErrorCode == -2147220960)
                     {
