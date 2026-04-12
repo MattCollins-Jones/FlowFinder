@@ -76,8 +76,17 @@ namespace Flow_Finder
         private void BtnAddToSolution_Click(object sender, EventArgs e)
         {
             var sel = cbAvailableSolutions.SelectedItem as SolutionItem; if (sel == null) { MessageBox.Show("Select a solution to add the flow to."); return; }
+            btnAddToSolution.Enabled = false; btnRemoveFromSolution.Enabled = false; btnClose.Enabled = false;
             var busy = new BusyForm("Adding flow to solution..."); busy.Show(this);
-            var op = Task.Run(() => { try { var req = new AddSolutionComponentRequest { SolutionUniqueName = sel.UniqueName, ComponentType = FlowFinderControl.SolutionComponentTypeCloudFlow, ComponentId = _flowId }; _service.Execute(req); return (Exception)null; } catch (Exception ex) { return ex; } }).ContinueWith(t => { try { busy.Close(); } catch { /* safe cleanup */ } if (t.Result == null) { MessageBox.Show("Flow added to solution."); ChangesMade = true; } else { MessageBox.Show("Failed to add flow to solution: " + t.Result.Message); } LoadData(); }, TaskScheduler.FromCurrentSynchronizationContext());
+            var op = Task.Run(() => { try { var req = new AddSolutionComponentRequest { SolutionUniqueName = sel.UniqueName, ComponentType = FlowFinderControl.SolutionComponentTypeCloudFlow, ComponentId = _flowId }; _service.Execute(req); return (Exception)null; } catch (Exception ex) { return ex; } }).ContinueWith(t =>
+            {
+                try { busy.Close(); } catch { /* safe cleanup */ }
+                if (IsDisposed || !IsHandleCreated) return;
+                btnAddToSolution.Enabled = true; btnRemoveFromSolution.Enabled = true; btnClose.Enabled = true;
+                if (t.Result == null) { MessageBox.Show("Flow added to solution."); ChangesMade = true; }
+                else { MessageBox.Show("Failed to add flow to solution: " + t.Result.Message); }
+                if (!IsDisposed) LoadData();
+            }, TaskScheduler.FromCurrentSynchronizationContext());
             _lastOperation = op;
         }
 
@@ -85,8 +94,17 @@ namespace Flow_Finder
         {
             var sel = lbSolutions.SelectedItem as SolutionItem; if (sel == null) { MessageBox.Show("Select a solution to remove the flow from."); return; }
             var confirm = MessageBox.Show($"Remove flow from solution '{sel.FriendlyName}'?", "Confirm", MessageBoxButtons.YesNo, MessageBoxIcon.Question); if (confirm != DialogResult.Yes) return;
+            btnAddToSolution.Enabled = false; btnRemoveFromSolution.Enabled = false; btnClose.Enabled = false;
             var busy = new BusyForm("Removing flow from solution..."); busy.Show(this);
-            var op = Task.Run(() => { try { var req = new RemoveSolutionComponentRequest { SolutionUniqueName = sel.UniqueName, ComponentType = FlowFinderControl.SolutionComponentTypeCloudFlow, ComponentId = _flowId }; _service.Execute(req); return (Exception)null; } catch (Exception ex) { return ex; } }).ContinueWith(t => { try { busy.Close(); } catch { /* safe cleanup */ } if (t.Result == null) { MessageBox.Show("Flow removed from solution."); ChangesMade = true; } else { MessageBox.Show("Failed to remove flow from solution: " + t.Result.Message); } LoadData(); }, TaskScheduler.FromCurrentSynchronizationContext());
+            var op = Task.Run(() => { try { var req = new RemoveSolutionComponentRequest { SolutionUniqueName = sel.UniqueName, ComponentType = FlowFinderControl.SolutionComponentTypeCloudFlow, ComponentId = _flowId }; _service.Execute(req); return (Exception)null; } catch (Exception ex) { return ex; } }).ContinueWith(t =>
+            {
+                try { busy.Close(); } catch { /* safe cleanup */ }
+                if (IsDisposed || !IsHandleCreated) return;
+                btnAddToSolution.Enabled = true; btnRemoveFromSolution.Enabled = true; btnClose.Enabled = true;
+                if (t.Result == null) { MessageBox.Show("Flow removed from solution."); ChangesMade = true; }
+                else { MessageBox.Show("Failed to remove flow from solution: " + t.Result.Message); }
+                if (!IsDisposed) LoadData();
+            }, TaskScheduler.FromCurrentSynchronizationContext());
             _lastOperation = op;
         }
 

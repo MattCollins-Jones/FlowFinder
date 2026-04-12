@@ -79,6 +79,7 @@ namespace Flow_Finder
             InitializeComponent();
             InitializeFlowsTable();
             dgvFlows.DataBindingComplete += DgvFlows_DataBindingComplete;
+            this.Disposed += (s, e) => { _boldFont?.Dispose(); _boldFont = null; };
         }
 
         private void DgvFlows_DataBindingComplete(object sender, DataGridViewBindingCompleteEventArgs e)

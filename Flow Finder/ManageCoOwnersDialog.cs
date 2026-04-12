@@ -77,25 +77,29 @@ namespace Flow_Finder
                 lbCoOwners.Items.Add(new ListItem { Id = id, Name = display });
             }
 
-            // Populate users combobox with available users (exclude existing principals and disabled users)
+            // Populate users combobox with available users — use paging to handle environments with >5000 users
             try
             {
                 var available = new List<ListItem>();
-                var userQAll = new QueryExpression("systemuser") { ColumnSet = new ColumnSet("systemuserid", "fullname", "isdisabled") };
-                // retrieve only enabled users to avoid listing disabled accounts
+                var userQAll = new QueryExpression("systemuser") { ColumnSet = new ColumnSet("systemuserid", "fullname") };
                 userQAll.Criteria.AddCondition("isdisabled", ConditionOperator.Equal, false);
-                var allUsers = _service.RetrieveMultiple(userQAll);
-                if (allUsers != null && allUsers.Entities != null)
+                userQAll.PageInfo = new PagingInfo { Count = 5000, PageNumber = 1, ReturnTotalRecordCount = false };
+                EntityCollection page;
+                do
                 {
-                    foreach (var u in allUsers.Entities)
+                    page = _service.RetrieveMultiple(userQAll);
+                    foreach (var u in page.Entities)
                     {
                         var uid = u.Id;
-                        if (principalIds.Contains(uid)) continue; // skip already-shared principals
+                        if (principalIds.Contains(uid)) continue;
                         var fullname = string.Empty;
                         try { fullname = u.GetAttributeValue<string>("fullname") ?? uid.ToString(); } catch { fullname = uid.ToString(); }
                         available.Add(new ListItem { Id = uid, Name = fullname });
                     }
-                }
+                    userQAll.PageInfo.PageNumber++;
+                    userQAll.PageInfo.PagingCookie = page.PagingCookie;
+                } while (page.MoreRecords);
+
                 available = available.OrderBy(x => x.Name).ToList();
                 if (available.Any())
                 {
@@ -113,7 +117,8 @@ namespace Flow_Finder
         private void BtnAdd_Click(object sender, EventArgs e)
         {
             var sel = cbUsers.SelectedItem as ListItem; if (sel == null) { MessageBox.Show("Select a user to add."); return; }
-            btnAdd.Enabled = false; btnRemove.Enabled = false; cbUsers.Enabled = false; lbCoOwners.Enabled = false; var busy = new BusyForm("Adding Co-Owner..."); busy.Show(this);
+            btnAdd.Enabled = false; btnRemove.Enabled = false; cbUsers.Enabled = false; lbCoOwners.Enabled = false; btnClose.Enabled = false;
+            var busy = new BusyForm("Adding Co-Owner..."); busy.Show(this);
             var op = Task.Run(() =>
             {
                 try
@@ -126,10 +131,11 @@ namespace Flow_Finder
             }).ContinueWith(t =>
             {
                 try { busy.Close(); } catch { /* safe cleanup */ }
-                btnAdd.Enabled = true; btnRemove.Enabled = true; cbUsers.Enabled = true; lbCoOwners.Enabled = true;
+                if (IsDisposed || !IsHandleCreated) return;
+                btnAdd.Enabled = true; btnRemove.Enabled = true; cbUsers.Enabled = true; lbCoOwners.Enabled = true; btnClose.Enabled = true;
                 if (t.Result == null) { _logInfo($"Added Co-Owner {sel.Name}"); MessageBox.Show("Added Co-Owner."); ChangesMade = true; }
                 else { _logWarn("Failed to add Co-Owner: " + t.Result.Message); MessageBox.Show("Failed to add Co-Owner: " + t.Result.Message); }
-                LoadData();
+                if (!IsDisposed) LoadData();
             }, TaskScheduler.FromCurrentSynchronizationContext());
             _lastOperation = op;
         }
@@ -138,7 +144,8 @@ namespace Flow_Finder
         {
             var sel = lbCoOwners.SelectedItem as ListItem; if (sel == null) { MessageBox.Show("Select a Co-Owner to remove."); return; }
             var confirm = MessageBox.Show($"Are you sure you want to remove Co-Owner '{sel.Name}'?", "Confirm remove", MessageBoxButtons.YesNo, MessageBoxIcon.Question); if (confirm != DialogResult.Yes) return;
-            btnAdd.Enabled = false; btnRemove.Enabled = false; cbUsers.Enabled = false; lbCoOwners.Enabled = false; var busy = new BusyForm("Removing Co-Owner..."); busy.Show(this);
+            btnAdd.Enabled = false; btnRemove.Enabled = false; cbUsers.Enabled = false; lbCoOwners.Enabled = false; btnClose.Enabled = false;
+            var busy = new BusyForm("Removing Co-Owner..."); busy.Show(this);
             var op = Task.Run(() =>
             {
                 try { var revoke = new RevokeAccessRequest { Target = new EntityReference("workflow", _flowId), Revokee = new EntityReference("systemuser", sel.Id) }; _service.Execute(revoke); return (Exception)null; }
@@ -146,10 +153,11 @@ namespace Flow_Finder
             }).ContinueWith(t =>
             {
                 try { busy.Close(); } catch { /* safe cleanup */ }
-                btnAdd.Enabled = true; btnRemove.Enabled = true; cbUsers.Enabled = true; lbCoOwners.Enabled = true;
+                if (IsDisposed || !IsHandleCreated) return;
+                btnAdd.Enabled = true; btnRemove.Enabled = true; cbUsers.Enabled = true; lbCoOwners.Enabled = true; btnClose.Enabled = true;
                 if (t.Result == null) { _logInfo($"Removed Co-Owner {sel.Name}"); MessageBox.Show("Removed Co-Owner."); ChangesMade = true; }
                 else { _logWarn("Failed to remove Co-Owner: " + t.Result.Message); MessageBox.Show("Failed to remove Co-Owner: " + t.Result.Message); }
-                LoadData();
+                if (!IsDisposed) LoadData();
             }, TaskScheduler.FromCurrentSynchronizationContext());
             _lastOperation = op;
         }
