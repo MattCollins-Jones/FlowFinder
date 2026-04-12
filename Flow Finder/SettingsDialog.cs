@@ -38,7 +38,7 @@ namespace Flow_Finder
                     bodyBuilder.AppendLine($"OS: {Environment.OSVersion}");
                     bodyBuilder.AppendLine($"CLR: {Environment.Version}");
                     var body = System.Uri.EscapeDataString(bodyBuilder.ToString());
-                    var url = $"https://github.com/{"MattCollins-Jones"}/{"FlowFinder"}/issues/new?title={title}&body={body}";
+                    var url = $"https://github.com/{FlowFinderControl.GitHubUserName}/{FlowFinderControl.GitHubRepoName}/issues/new?title={title}&body={body}";
                     var psi = new System.Diagnostics.ProcessStartInfo { FileName = url, UseShellExecute = true };
                     System.Diagnostics.Process.Start(psi);
                 }

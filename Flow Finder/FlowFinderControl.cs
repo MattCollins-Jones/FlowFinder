@@ -23,8 +23,10 @@ namespace Flow_Finder
     public partial class FlowFinderControl : PluginControlBase, IGitHubPlugin
     {
         // Implement IGitHubPlugin so XrmToolBox will show the standard feedback -> New issue menu
-        public string RepositoryName => "FlowFinder";
-        public string UserName => "MattCollins-Jones";
+        internal static readonly string GitHubRepoName = "FlowFinder";
+        internal static readonly string GitHubUserName = "MattCollins-Jones";
+        public string RepositoryName => GitHubRepoName;
+        public string UserName => GitHubUserName;
 
         private Settings mySettings;
         private DataTable flowsTable;
@@ -471,56 +473,65 @@ namespace Flow_Finder
                     var qe = new QueryExpression("workflow") { ColumnSet = new ColumnSet("workflowid", "name", "ownerid", "type", "category", "description", "createdby", "clientdata", "statecode"), Criteria = new FilterExpression() };
                     qe.Criteria.AddCondition("type", ConditionOperator.Equal, 1);
                     qe.Criteria.AddCondition("category", ConditionOperator.Equal, WorkflowCategoryCloudFlow);
-                    var flows = Service.RetrieveMultiple(qe);
+                    var flowEntities = RetrieveAllPages(Service, qe);
 
-                    if (flows == null || flows.Entities.Count == 0)
+                    if (flowEntities.Count == 0)
                     {
                         var qe2 = new QueryExpression("workflow") { ColumnSet = new ColumnSet("workflowid", "name", "ownerid", "type", "category", "description", "createdby", "clientdata", "statecode"), Criteria = new FilterExpression() };
                         qe2.Criteria.AddCondition("type", ConditionOperator.Equal, 1);
                         qe2.Criteria.AddCondition("category", ConditionOperator.In, new object[] { WorkflowCategoryScheduledFlow, WorkflowCategoryCloudFlow, WorkflowCategoryDesktopFlow });
-                        flows = Service.RetrieveMultiple(qe2);
+                        flowEntities = RetrieveAllPages(Service, qe2);
                     }
-                    if (flows == null || flows.Entities.Count == 0)
+                    if (flowEntities.Count == 0)
                     {
                         var qe3 = new QueryExpression("workflow") { ColumnSet = new ColumnSet("workflowid", "name", "ownerid", "type", "category", "description", "createdby", "clientdata", "statecode") };
                         qe3.Criteria.AddCondition("type", ConditionOperator.Equal, 1);
-                        flows = Service.RetrieveMultiple(qe3);
+                        flowEntities = RetrieveAllPages(Service, qe3);
                     }
 
                     var scQ = new QueryExpression("solutioncomponent") { ColumnSet = new ColumnSet("solutionid", "objectid", "componenttype"), Criteria = new FilterExpression() };
                     scQ.Criteria.AddCondition("componenttype", ConditionOperator.Equal, SolutionComponentTypeCloudFlow);
-                    var solutionComponents = Service.RetrieveMultiple(scQ);
+                    var solutionComponentEntities = RetrieveAllPages(Service, scQ);
 
-                    var solutionIds = solutionComponents.Entities.Select(sc => GetGuidFromAttribute(sc, "solutionid")).Where(g => g != Guid.Empty).Distinct().ToList();
+                    var solutionIds = solutionComponentEntities.Select(sc => GetGuidFromAttribute(sc, "solutionid")).Where(g => g != Guid.Empty).Distinct().ToList();
                     var solutionNames = new Dictionary<Guid, string>();
                     var solutionIsManaged = new Dictionary<Guid, bool>();
                     // built locally on the background thread and assigned to the field only in PostWorkCallBack (UI thread) — no data race
                     var newManagedStatus = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
                     if (solutionIds.Any())
                     {
-                        var solFetch = new QueryExpression("solution") { ColumnSet = new ColumnSet("solutionid", "friendlyname", "uniquename", "ismanaged") };
-                        solFetch.Criteria.AddCondition("solutionid", ConditionOperator.In, solutionIds.Select(g => (object)g).ToArray());
-                        var sols = Service.RetrieveMultiple(solFetch);
-                        foreach (var s in sols.Entities)
+                        foreach (var idBatch in ToBatches(solutionIds, 500))
                         {
-                            var friendly = GetStringSafe(s, "friendlyname") ?? GetStringSafe(s, "uniquename");
-                            var uniq = GetStringSafe(s, "uniquename") ?? string.Empty;
-                            if (!string.IsNullOrEmpty(uniq) && uniq.Equals("default", StringComparison.OrdinalIgnoreCase)) continue;
-                            if (!string.IsNullOrEmpty(friendly) && (friendly.IndexOf("default solution", StringComparison.OrdinalIgnoreCase) >= 0 || friendly.IndexOf("active solution", StringComparison.OrdinalIgnoreCase) >= 0)) continue;
-                            solutionNames[s.Id] = friendly;
-                            bool isManaged = false;
-                            try { isManaged = s.GetAttributeValue<bool?>("ismanaged") ?? false; } catch { }
-                            solutionIsManaged[s.Id] = isManaged;
-                            if (!string.IsNullOrEmpty(friendly) && !newManagedStatus.ContainsKey(friendly))
+                            try
                             {
-                                newManagedStatus.Add(friendly, isManaged);
+                                var solFetch = new QueryExpression("solution") { ColumnSet = new ColumnSet("solutionid", "friendlyname", "uniquename", "ismanaged") };
+                                solFetch.Criteria.AddCondition("solutionid", ConditionOperator.In, idBatch.Cast<object>().ToArray());
+                                foreach (var s in RetrieveAllPages(Service, solFetch))
+                                {
+                                    var friendly = GetStringSafe(s, "friendlyname") ?? GetStringSafe(s, "uniquename");
+                                    var uniq = GetStringSafe(s, "uniquename") ?? string.Empty;
+                                    if (!string.IsNullOrEmpty(uniq) && uniq.Equals("default", StringComparison.OrdinalIgnoreCase)) continue;
+                                    if (!string.IsNullOrEmpty(friendly) && (friendly.IndexOf("default solution", StringComparison.OrdinalIgnoreCase) >= 0 || friendly.IndexOf("active solution", StringComparison.OrdinalIgnoreCase) >= 0)) continue;
+                                    solutionNames[s.Id] = friendly;
+                                    bool isManaged = false;
+                                    try { isManaged = s.GetAttributeValue<bool?>("ismanaged") ?? false; } catch { }
+                                    solutionIsManaged[s.Id] = isManaged;
+                                    if (!string.IsNullOrEmpty(friendly) && !newManagedStatus.ContainsKey(friendly))
+                                    {
+                                        newManagedStatus.Add(friendly, isManaged);
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                LogWarning($"Failed to fetch solution names for batch: {ex.Message}");
                             }
                         }
                     }
 
                     var flowSolutionNames = new Dictionary<Guid, List<string>>();
                     var flowSolutionIds = new Dictionary<Guid, List<Guid>>();
-                    foreach (var sc in solutionComponents.Entities)
+                    foreach (var sc in solutionComponentEntities)
                     {
                         var objId = GetGuidFromAttribute(sc, "objectid");
                         var solId = GetGuidFromAttribute(sc, "solutionid");
@@ -543,35 +554,30 @@ namespace Flow_Finder
                     bool poaQuerySucceeded = false;
                     try
                     {
-                        var flowIds = flows.Entities.Select(f => f.Id).ToList();
-                        var poaQ = new QueryExpression("principalobjectaccess")
-                        {
-                            ColumnSet = new ColumnSet("objectid", "principalid", "accessrightsmask")
-                        };
-                        poaQ.Criteria.AddCondition("objecttypecode", ConditionOperator.Equal, WorkflowEntityTypeCode);
-                        poaQ.Criteria.AddCondition("objectid", ConditionOperator.In, flowIds.Cast<object>().ToArray());
-                        // Only include records with a direct (non-inherited) share — accessrightsmask > 0.
-                        // Records with only team-inherited access have accessrightsmask = 0 and would otherwise
-                        // cause revoked co-owners to reappear on full reload.
-                        poaQ.Criteria.AddCondition("accessrightsmask", ConditionOperator.GreaterThan, 0);
-                        poaQ.PageInfo = new PagingInfo { Count = 5000, PageNumber = 1, ReturnTotalRecordCount = false };
-                        EntityCollection poaPage;
+                        var flowIds = flowEntities.Select(f => f.Id).ToList();
                         int totalPoa = 0;
-                        do
+                        foreach (var poaBatch in ToBatches(flowIds, 500))
                         {
-                            poaPage = Service.RetrieveMultiple(poaQ);
-                            totalPoa += poaPage.Entities.Count;
-                            foreach (var poa in poaPage.Entities)
+                            var poaQ = new QueryExpression("principalobjectaccess")
                             {
+                                ColumnSet = new ColumnSet("objectid", "principalid", "accessrightsmask")
+                            };
+                            poaQ.Criteria.AddCondition("objecttypecode", ConditionOperator.Equal, WorkflowEntityTypeCode);
+                            poaQ.Criteria.AddCondition("objectid", ConditionOperator.In, poaBatch.Cast<object>().ToArray());
+                            // Only include records with a direct (non-inherited) share — accessrightsmask > 0.
+                            // Records with only team-inherited access have accessrightsmask = 0 and would otherwise
+                            // cause revoked co-owners to reappear on full reload.
+                            poaQ.Criteria.AddCondition("accessrightsmask", ConditionOperator.GreaterThan, 0);
+                            foreach (var poa in RetrieveAllPages(Service, poaQ))
+                            {
+                                totalPoa++;
                                 var objId = GetGuidFromAttribute(poa, "objectid");
                                 var principalId = GetGuidFromAttribute(poa, "principalid");
                                 if (objId == Guid.Empty || principalId == Guid.Empty) continue;
                                 if (!flowPrincipals.ContainsKey(objId)) flowPrincipals[objId] = new List<Guid>();
                                 flowPrincipals[objId].Add(principalId);
                             }
-                            poaQ.PageInfo.PageNumber++;
-                            poaQ.PageInfo.PagingCookie = poaPage.PagingCookie;
-                        } while (poaPage.MoreRecords);
+                        }
                         poaQuerySucceeded = true;
                         LogInfo($"POA bulk query returned {totalPoa} records for {flowIds.Count} flows.");
                     }
@@ -584,7 +590,7 @@ namespace Flow_Finder
                         LogWarning($"POA bulk query failed ({ex.Message}) — falling back to per-flow share lookup.");
                     }
 
-                    foreach (var f in flows.Entities)
+                    foreach (var f in flowEntities)
                     {
                         var stateCode = f.Contains("statecode") ? f.GetAttributeValue<OptionSetValue>("statecode").Value : -1;
                         var flowId = f.Id;
@@ -1233,6 +1239,32 @@ namespace Flow_Finder
                     }
                 }
             }
+        }
+
+        private static List<Entity> RetrieveAllPages(IOrganizationService svc, QueryExpression qe)
+        {
+            qe.PageInfo = new PagingInfo { Count = 5000, PageNumber = 1, ReturnTotalRecordCount = false };
+            var all = new List<Entity>();
+            EntityCollection page;
+            do
+            {
+                page = svc.RetrieveMultiple(qe);
+                all.AddRange(page.Entities);
+                qe.PageInfo.PageNumber++;
+                qe.PageInfo.PagingCookie = page.PagingCookie;
+            } while (page.MoreRecords);
+            return all;
+        }
+
+        private static IEnumerable<List<T>> ToBatches<T>(IEnumerable<T> source, int maxBatchSize)
+        {
+            var batch = new List<T>(maxBatchSize);
+            foreach (var item in source)
+            {
+                batch.Add(item);
+                if (batch.Count == maxBatchSize) { yield return batch; batch = new List<T>(maxBatchSize); }
+            }
+            if (batch.Count > 0) yield return batch;
         }
     }
 }
