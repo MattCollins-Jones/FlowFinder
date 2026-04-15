@@ -8,6 +8,7 @@
     <owners>Matt Collins-Jones</owners>
     <projectUrl>https://github.com/MattCollins-Jones/FlowFinder</projectUrl>
     <icon>images\icon.png</icon>
+    <readme>docs\README.md</readme>
     <requireLicenseAcceptance>false</requireLicenseAcceptance>
     <description>Find the solutions that contain the flows, update co-owners and solutions, filter by solution, hide/show managed solutions and export flows to CSV.</description>
     <summary>Find the solutions that contain the flows and manage co-owners/solutions. Includes filtering and CSV export.</summary>
@@ -26,6 +27,7 @@
     <tags>XrmToolBox Cloud Flows Power Automate Power Platform</tags>
   </metadata>
   <files>
+    <file src="..\README.md" target="docs\" />
     <file src="icon.png" target="images\" />
     <file src="bin\Release\FlowFinder.dll" target="lib\net48" />
   </files>
