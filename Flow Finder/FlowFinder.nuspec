@@ -2,23 +2,25 @@
 <package>
   <metadata>
     <id>FlowFinder</id>
-    <version>1.2025.12.14</version>
+    <version>1.2026.4.15</version>
     <title>Flow Finder</title>
     <authors>Matt Collins-Jones</authors>
     <owners>Matt Collins-Jones</owners>
     <projectUrl>https://github.com/MattCollins-Jones/FlowFinder</projectUrl>
-    <icon>icon.png</icon>
+    <icon>images\icon.png</icon>
     <requireLicenseAcceptance>false</requireLicenseAcceptance>
     <description>Find the solutions that contain the flows, update co-owners and solutions, filter by solution, hide/show managed solutions and export flows to CSV.</description>
     <summary>Find the solutions that contain the flows and manage co-owners/solutions. Includes filtering and CSV export.</summary>
-    <releaseNotes>Initial release. Tool includes the ability to:
+    <releaseNotes>v1.2026.4.15
 
- - Find the solutions a flow is within
- - Update the Co-owners
- - Update the Solutions
- - Filter based on Solution
- - Export Flows to a CSV file
- - Hide/show flows in managed solutions
+ - New: View Schema button — inspect a flow's full JSON definition (triggers, actions, connection references) in a dialog with Copy to Clipboard.
+ - Fix: Revoked co-owners reappearing after full reload (accessrightsmask filter added to POA query).
+ - Fix: Loading animation freeze — grid data binding moved off UI thread.
+ - Fix: GDI font handle leak on bold row formatting.
+ - Fix: Close button accessible mid-load on management dialogs.
+ - Improvement: Consistent "Co-Owners" capitalisation throughout.
+ - Improvement: Dataverse queries now paged (5,000/page) and IN clauses chunked (≤500) for large environments.
+ - Improvement: Solution and Co-Owner dialogs load data asynchronously.
 </releaseNotes>
 <license type="expression">MIT</license>
     <tags>XrmToolBox Cloud Flows Power Automate Power Platform</tags>

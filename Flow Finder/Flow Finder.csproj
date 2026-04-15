@@ -256,6 +256,7 @@
     <Compile Include="ManageSolutionsDialog.cs" />
     <Compile Include="SettingsDialog.cs" />
     <Compile Include="Settings.cs" />
+    <Compile Include="ViewSchemaDialog.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="app.config" />

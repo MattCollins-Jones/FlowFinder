@@ -47,7 +47,17 @@ Contributing
 
 - Issues and pull requests are welcome. Open them on the project repository: https://github.com/MattCollins-Jones/FlowFinder
 
- Changelog (v1.2026.1.15)
+ Changelog (v1.2026.4.15)
+- **New**: View Schema button — select any flow and click "View Schema" to inspect the full JSON definition (triggers, actions, connection references) in a dialog. Includes a Copy to Clipboard button.
+- **Fix**: Co-owners added or removed were reappearing after a full reload. The principalobjectaccess query now filters out rows where `accessrightsmask = 0`, which previously caused revoked co-owners to persist.
+- **Fix**: Loading animation froze while flows were loading. Grid data binding is now performed off the UI thread.
+- **Fix**: GDI font handle leak — the bold font used for conditional row formatting is now properly disposed.
+- **Fix**: Close button on dialogs was accessible during background operations, which could cause errors if clicked mid-load.
+- **Improvement**: All labels, buttons and dialogs now consistently use "Co-Owners" capitalisation.
+- **Improvement**: Large environments are now handled more reliably — Dataverse queries are paged (up to 5,000 records per page) and IN clauses are automatically chunked into batches of ≤500.
+- **Improvement**: Solution and Co-Owner dialogs now load data asynchronously on open, keeping the UI responsive.
+
+
 - **New**: Added clickable link to open a flow from "Link to flow" column 
 - **New**: ICON UPDATE - Thanks to Cooky for the new icon design! Icons from Lizel Arina & kliwir art at flaticon.com
 - **New**: Added current status of flow, active, inactive, suspended. Thanks to Amine Debba for this suggestion.
