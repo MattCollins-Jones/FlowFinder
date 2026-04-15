@@ -914,21 +914,34 @@ namespace Flow_Finder
 
         private static Image CreateCodeIcon()
         {
+            // Render at 4x size then scale down for clean anti-aliased result
+            const int scale = 4;
             const int size = 16;
-            var bmp = new Bitmap(size, size, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-            using (var g = Graphics.FromImage(bmp))
+            const int big = size * scale;
+            using (var bigBmp = new Bitmap(big, big, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
+            using (var g = Graphics.FromImage(bigBmp))
             {
                 g.Clear(Color.Transparent);
-                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
-                using (var font = new Font("Segoe UI", 6.5f, FontStyle.Bold, GraphicsUnit.Point))
-                using (var brush = new SolidBrush(Color.FromArgb(60, 60, 60)))
+                g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                using (var pen = new Pen(Color.FromArgb(80, 80, 80), 2.0f))
                 {
-                    var text = "</>";
-                    var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
-                    g.DrawString(text, font, brush, new RectangleF(0, 0, size, size), sf);
+                    pen.LineJoin = System.Drawing.Drawing2D.LineJoin.Miter;
+                    // < bracket (inset from edges for padding)
+                    g.DrawLines(pen, new[] { new PointF(22, 12), new PointF(12, 32), new PointF(22, 52) });
+                    // / slash
+                    g.DrawLine(pen, 36, 12, 28, 52);
+                    // > bracket
+                    g.DrawLines(pen, new[] { new PointF(42, 12), new PointF(52, 32), new PointF(42, 52) });
                 }
+
+                var result = new Bitmap(size, size, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+                using (var gr = Graphics.FromImage(result))
+                {
+                    gr.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                    gr.DrawImage(bigBmp, 0, 0, size, size);
+                }
+                return result;
             }
-            return bmp;
         }
 
         private void tsbClose_Click(object sender, EventArgs e)
@@ -1196,6 +1209,7 @@ namespace Flow_Finder
                     dynamic res = a.Result; var fi = (FlowInfo)res.Flow; var disabled = (Guid[])res.DisabledPrincipalIds;
                     var idx = lastResults.FindIndex(x => x.Id == fi.Id); if (idx >= 0) lastResults[idx] = fi;
                     if (!string.IsNullOrEmpty(fi.ClientDataJson)) _flowClientData[fi.Id] = fi.ClientDataJson;
+                    else _flowClientData.Remove(fi.Id);
                     foreach (DataGridViewRow row in dgvFlows.Rows)
                     {
                         if (row.Tag is Guid id && id == fi.Id)

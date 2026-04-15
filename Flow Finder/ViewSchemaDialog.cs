@@ -12,6 +12,7 @@ namespace Flow_Finder
         private RichTextBox _rtbJson;
         private Button _btnCopy;
         private Button _btnClose;
+        private Font _rtbFont;
 
         internal ViewSchemaDialog(string flowName, string rawJson)
         {
@@ -27,11 +28,12 @@ namespace Flow_Finder
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.Sizable;
 
+            _rtbFont = new Font("Consolas", 10f, FontStyle.Regular, GraphicsUnit.Point);
             _rtbJson = new RichTextBox
             {
                 Dock = DockStyle.Fill,
                 ReadOnly = true,
-                Font = new Font("Consolas", 10f, FontStyle.Regular, GraphicsUnit.Point),
+                Font = _rtbFont,
                 ScrollBars = RichTextBoxScrollBars.Both,
                 WordWrap = false,
                 BackColor = SystemColors.Window,
@@ -96,6 +98,12 @@ namespace Flow_Finder
             {
                 MessageBox.Show("Failed to copy: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) _rtbFont?.Dispose();
+            base.Dispose(disposing);
         }
     }
 }
