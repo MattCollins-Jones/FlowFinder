@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package>
   <metadata>
-    <id>FlowFinder</id>
+    <id>MCJ.FlowFinder</id>
     <version>1.2026.4.15</version>
     <title>Flow Finder</title>
     <authors>Matt Collins-Jones</authors>
