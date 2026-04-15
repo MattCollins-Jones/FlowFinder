@@ -32,6 +32,7 @@ namespace Flow_Finder
         private DataTable flowsTable;
         private List<FlowInfo> lastResults = new List<FlowInfo>();
         private Dictionary<string, bool> _solutionManagedStatus = new Dictionary<string, bool>();
+        private Dictionary<Guid, string> _flowClientData = new Dictionary<Guid, string>();
         private Font _boldFont;
 
         internal const int WorkflowCategoryCloudFlow = 6;
@@ -59,6 +60,7 @@ namespace Flow_Finder
             public string OtherDataSources { get; set; }
             public string Status { get; set; }
             public string LinkToFlow { get; set; }
+            public string ClientDataJson { get; set; }
         }
 
         private string MapStateCodeToStatus(int stateCode)
@@ -655,7 +657,11 @@ namespace Flow_Finder
                         try
                         {
                             var clientJson = GetStringSafe(f, "clientdata");
-                            if (!string.IsNullOrEmpty(clientJson)) ParseClientData(clientJson, fi);
+                            if (!string.IsNullOrEmpty(clientJson))
+                            {
+                                fi.ClientDataJson = clientJson;
+                                ParseClientData(clientJson, fi);
+                            }
                         }
                         catch (Exception ex)
                         {
@@ -765,6 +771,11 @@ namespace Flow_Finder
                     var disabledIds = r.DisabledPrincipalIds;
                     _solutionManagedStatus = r.ManagedStatus;
 
+                    _flowClientData.Clear();
+                    foreach (var f in lastResults)
+                        if (!string.IsNullOrEmpty(f.ClientDataJson))
+                            _flowClientData[f.Id] = f.ClientDataJson;
+
                     try { dgvFlows.DataSource = null; } catch { }
                     flowsTable.Clear();
                     dgvFlows.SuspendLayout();
@@ -828,6 +839,7 @@ namespace Flow_Finder
                 {
                     AddRuntimeButtonIfMissing("tsbManageCoOwners", "Manage Co-Owners", global::FlowFinder.Properties.Resources.UsersMan, tsbManageCoOwners_Click);
                     AddRuntimeButtonIfMissing("tsbManageSolutions", "Manage Solutions", global::FlowFinder.Properties.Resources.SolIcon, tsbManageSolutions_Click);
+                    AddRuntimeButtonIfMissing("tsbViewSchema", "View Schema", tsbViewSchema_Click);
                     AddRuntimeButtonIfMissing("tsbSettingsRuntime", "Settings", global::FlowFinder.Properties.Resources.Settings, tsbSettings_Click);
                     // Feedback is provided via the host Feedback menu (IGitHubPlugin). Do not add a runtime toolbar button here.
                  }
@@ -1006,6 +1018,25 @@ namespace Flow_Finder
             }
         }
 
+        private void tsbViewSchema_Click(object sender, EventArgs e)
+        {
+            DataGridViewRow row = null;
+            if (dgvFlows.SelectedRows != null && dgvFlows.SelectedRows.Count > 0) row = dgvFlows.SelectedRows[0];
+            else row = dgvFlows.CurrentRow;
+            if (row == null) { MessageBox.Show("Please select a flow in the list first.", "Info", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+            if (row.Tag == null || !(row.Tag is Guid flowId)) return;
+
+            if (!_flowClientData.TryGetValue(flowId, out var json) || string.IsNullOrEmpty(json))
+            {
+                MessageBox.Show("No schema (clientdata) is available for the selected flow.", "View Schema", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var flowName = row.Cells["Name"].Value?.ToString() ?? flowId.ToString();
+            using (var dlg = new ViewSchemaDialog(flowName, json))
+                dlg.ShowDialog(this);
+        }
+
         private void RefreshAccordingtoSetting(Guid flowId)
         {
             var mode = mySettings?.RefreshAfterDialogMode ?? Flow_Finder.RefreshMode.RefreshFlow;
@@ -1028,6 +1059,7 @@ namespace Flow_Finder
                         var stateCode = wf.Contains("statecode") ? wf.GetAttributeValue<OptionSetValue>("statecode").Value : -1;
                         fi.Id = wf.Id; fi.Name = GetStringSafe(wf, "name"); fi.Description = GetStringSafe(wf, "description"); fi.Owner = GetEntityReferenceName(wf, "ownerid"); fi.OwnerId = GetGuidFromAttribute(wf, "ownerid"); fi.CreatedBy = GetEntityReferenceName(wf, "createdby");
                         fi.Status = MapStateCodeToStatus(stateCode);
+                        try { var cj = GetStringSafe(wf, "clientdata"); if (!string.IsNullOrEmpty(cj)) fi.ClientDataJson = cj; } catch { }
 
                         // --- Start of fix: Fetch solution info for the single flow ---
                         var environmentId = ConnectionDetail.EnvironmentId?.ToString() ?? string.Empty;
@@ -1144,6 +1176,7 @@ namespace Flow_Finder
                     if (a.Result is Exception ex) { MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
                     dynamic res = a.Result; var fi = (FlowInfo)res.Flow; var disabled = (Guid[])res.DisabledPrincipalIds;
                     var idx = lastResults.FindIndex(x => x.Id == fi.Id); if (idx >= 0) lastResults[idx] = fi;
+                    if (!string.IsNullOrEmpty(fi.ClientDataJson)) _flowClientData[fi.Id] = fi.ClientDataJson;
                     foreach (DataGridViewRow row in dgvFlows.Rows)
                     {
                         if (row.Tag is Guid id && id == fi.Id)
