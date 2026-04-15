@@ -839,7 +839,7 @@ namespace Flow_Finder
                 {
                     AddRuntimeButtonIfMissing("tsbManageCoOwners", "Manage Co-Owners", global::FlowFinder.Properties.Resources.UsersMan, tsbManageCoOwners_Click);
                     AddRuntimeButtonIfMissing("tsbManageSolutions", "Manage Solutions", global::FlowFinder.Properties.Resources.SolIcon, tsbManageSolutions_Click);
-                    AddRuntimeButtonIfMissing("tsbViewSchema", "View Schema", tsbViewSchema_Click);
+                    AddRuntimeButtonIfMissing("tsbViewSchema", "View Schema", CreateCodeIcon(), tsbViewSchema_Click);
                     AddRuntimeButtonIfMissing("tsbSettingsRuntime", "Settings", global::FlowFinder.Properties.Resources.Settings, tsbSettings_Click);
                     // Feedback is provided via the host Feedback menu (IGitHubPlugin). Do not add a runtime toolbar button here.
                  }
@@ -910,6 +910,25 @@ namespace Flow_Finder
                 toolStripMenu.Items.Add(new ToolStripSeparator());
                 toolStripMenu.Items.Add(btn);
             }
+        }
+
+        private static Image CreateCodeIcon()
+        {
+            const int size = 16;
+            var bmp = new Bitmap(size, size, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(bmp))
+            {
+                g.Clear(Color.Transparent);
+                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+                using (var font = new Font("Segoe UI", 6.5f, FontStyle.Bold, GraphicsUnit.Point))
+                using (var brush = new SolidBrush(Color.FromArgb(60, 60, 60)))
+                {
+                    var text = "</>";
+                    var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+                    g.DrawString(text, font, brush, new RectangleF(0, 0, size, size), sf);
+                }
+            }
+            return bmp;
         }
 
         private void tsbClose_Click(object sender, EventArgs e)
