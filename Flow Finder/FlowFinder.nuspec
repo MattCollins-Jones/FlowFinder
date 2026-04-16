@@ -2,7 +2,7 @@
 <package>
   <metadata>
     <id>MCJ.FlowFinder</id>
-    <version>1.2026.4.15</version>
+    <version>1.2026.4.16</version>
     <title>Flow Finder</title>
     <authors>Matt Collins-Jones</authors>
     <owners>Matt Collins-Jones</owners>
@@ -10,9 +10,10 @@
     <icon>images\icon.png</icon>
     <readme>docs\README.md</readme>
     <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <copyright>2026</copyright>
     <description>Find the solutions that contain the flows, update co-owners and solutions, filter by solution, hide/show managed solutions and export flows to CSV.</description>
     <summary>Find the solutions that contain the flows and manage co-owners/solutions. Includes filtering and CSV export.</summary>
-    <releaseNotes>v1.2026.4.15
+    <releaseNotes>v1.2026.4.16
 
  - New: View Schema button — inspect a flow's full JSON definition (triggers, actions, connection references) in a dialog with Copy to Clipboard.
  - Fix: Revoked co-owners reappearing after full reload (accessrightsmask filter added to POA query).
@@ -23,12 +24,17 @@
  - Improvement: Dataverse queries now paged (5,000/page) and IN clauses chunked (≤500) for large environments.
  - Improvement: Solution and Co-Owner dialogs load data asynchronously.
 </releaseNotes>
-<license type="expression">MIT</license>
+    <license type="expression">MIT</license>
     <tags>XrmToolBox Cloud Flows Power Automate Power Platform</tags>
+    <dependencies>
+      <group targetFramework="net48">
+        <dependency id="XrmToolBoxPackage" version="1.2025.10.74" />
+      </group>
+    </dependencies>
   </metadata>
   <files>
     <file src="..\README.md" target="docs\" />
     <file src="icon.png" target="images\" />
-    <file src="bin\Release\FlowFinder.dll" target="lib\net48" />
+    <file src="bin\Release\FlowFinder.dll" target="lib\net48\Plugins\" />
   </files>
 </package>
